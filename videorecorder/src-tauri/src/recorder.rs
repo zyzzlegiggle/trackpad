@@ -221,6 +221,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
                 "-c:v", "libx264",
 
+                "-pix_fmt", "yuv420p",
+
                 "-preset", "ultrafast",
 
                 "-y",
