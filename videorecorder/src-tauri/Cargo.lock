@@ -711,7 +711,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cursorful-clone"
+name = "video-recorder"
 version = "0.1.0"
 dependencies = [
  "image",
