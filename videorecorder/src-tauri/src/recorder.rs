@@ -7,8 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::thread;
-
+use tauri::{AppHandle, Emitter, Manager};
 use tauri::State;
+use std::io::Cursor;
+use image::DynamicImage;
+
 
 use windows_capture::{
 
@@ -70,8 +73,9 @@ struct CaptureFlags {
     height: u32,
 
     fps: String,
-
+    app_handle: AppHandle,
 }
+
 
 
 // Zoom State
@@ -81,7 +85,11 @@ struct CaptureHandler {
     stop_signal: Arc<AtomicBool>,
     // Reusable buffer to avoid allocation every frame
     compact_buffer: Vec<u8>,
+    app_handle: Option<AppHandle>, 
+    frame_count: u64,
 }
+
+
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
     type Flags = CaptureFlags;
@@ -143,8 +151,11 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         Ok(Self {
             ffmpeg_process: child,
             stop_signal: flags.stop_signal,
+            app_handle: Some(flags.app_handle),
             compact_buffer: vec![0u8; (width * height * 4) as usize],
+            frame_count: 0,
         })
+
 
     }
 
@@ -229,7 +240,37 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
 
 
+
+
+        self.frame_count += 1;
+        if self.frame_count % 5 == 0 { // ~12 FPS
+             if let Some(app) = &self.app_handle {
+
+                
+                // Convert raw buffer to DynamicImage
+                // We assume BGRA8 (which is what windows-capture provides usually)
+                let img_buffer: Option<image::ImageBuffer<image::Rgba<u8>, &[u8]>> = 
+                    image::ImageBuffer::from_raw(width, height, src_data);
+                
+                if let Some(img) = img_buffer {
+                     // Resize to generic preview width (e.g. 480px width)
+                     let resized = image::imageops::resize(&img, 480, (480 * height) / width, image::imageops::FilterType::Nearest);
+                     
+                     // Encode to JPEG
+                     let mut jpg_data = Vec::new();
+                     let mut cursor = Cursor::new(&mut jpg_data);
+                     if let Ok(_) = resized.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(50)) {
+                         // Base64 encode
+                         let base64_str = base64::encode(&jpg_data);
+                        // Emit
+                         let _ = app.emit("preview-frame", base64_str);
+                     }
+                }
+             }
+        }
+
         Ok(())
+
 
     }
 
@@ -296,47 +337,30 @@ pub struct RecordTarget {
 
 #[tauri::command]
 
-pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: String, _target: Option<RecordTarget>) -> Result<(), String> {
-
+pub fn start_recording(app_handle: AppHandle, state: State<'_, RecorderState>, filename: String, fps: String, _target: Option<RecordTarget>) -> Result<(), String> {
     if state.is_recording.load(Ordering::Relaxed) {
-
         return Err("Already recording".to_string());
-
     }
-
    
-
     state.is_recording.store(true, Ordering::Relaxed);
-
     let signal = state.is_recording.clone();
-
+    let app_handle_clone = app_handle.clone();
    
-
     thread::spawn(move || {
-
         // Always capture primary monitor for now to fix errors
-
         let primary_monitor = Monitor::primary().expect("No primary monitor");
-
         let width = primary_monitor.width().expect("Failed to get monitor width");
-
         let height = primary_monitor.height().expect("Failed to get monitor height");
-
            
-
         let flags = CaptureFlags {
-
             filename,
-
             stop_signal: signal.clone(),
-
             width,
-
             height,
-
             fps,
-
+            app_handle: app_handle_clone,
         };
+
 
 
         let settings = Settings::new(

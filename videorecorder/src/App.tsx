@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
+
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -38,6 +40,21 @@ function App() {
   const [showOverlay, setShowOverlay] = useState(false);
   const [fps, setFps] = useState("60");
   const [previewSrc, setPreviewSrc] = useState("");
+  const [livePreviewSrc, setLivePreviewSrc] = useState("");
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    async function setupListener() {
+      unlisten = await listen<string>('preview-frame', (event) => {
+        setLivePreviewSrc(`data:image/jpeg;base64,${event.payload}`);
+      });
+    }
+    setupListener();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
 
   const toggleOverlay = async (show: boolean) => {
     setShowOverlay(show);
@@ -72,8 +89,10 @@ function App() {
         await invoke("start_recording", { filename, fps, target });
         setIsRecording(true);
         setStatus("Recording...");
-        setPreviewSrc(""); // Clear preview
+        setPreviewSrc(""); // Clear file preview
+        setLivePreviewSrc(""); // Clear old live preview
       }
+
     } catch (error) {
       console.error(error);
       setStatus(`Error: ${error}`);
@@ -90,17 +109,31 @@ function App() {
 
       <section className="preview-section">
         <div className="preview-container">
-          {previewSrc ? (
-            <video src={previewSrc} controls className="preview-player" />
-          ) : (
-            <div className="preview-placeholder">
-              <div className="placeholder-content">
-                <span className="icon">📺</span>
-                <span>No Preview Available</span>
+          {isRecording ? (
+            livePreviewSrc ? (
+              <img src={livePreviewSrc} className="preview-player" alt="Live Preview" />
+            ) : (
+              <div className="preview-placeholder">
+                <div className="placeholder-content">
+                  <span className="icon">🔴</span>
+                  <span>Recording...</span>
+                </div>
               </div>
-            </div>
+            )
+          ) : (
+            previewSrc ? (
+              <video src={previewSrc} controls className="preview-player" />
+            ) : (
+              <div className="preview-placeholder">
+                <div className="placeholder-content">
+                  <span className="icon">📺</span>
+                  <span>No Preview Available</span>
+                </div>
+              </div>
+            )
           )}
         </div>
+
       </section>
 
       <footer className="control-dock">
