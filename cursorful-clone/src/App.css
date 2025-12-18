@@ -1,11 +1,19 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Segoe UI', Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #1a1a1a;
+  color-scheme: dark;
+  --bg-dark: #1e1e1e;
+  --bg-panel: #2b2b2b;
+  --bg-input: #1a1a1a;
+  --border-color: #3e3e3e;
+  --accent-color: #3a3a3a;
+  --highlight-color: #4a4a4a;
+  --text-main: #e0e0e0;
+  --text-dim: #aaaaaa;
+  --record-red: #ff3333;
+  --record-active: #cc0000;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,80 +21,279 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
+body,
+html {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
 }
 
-.container {
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+.app-container {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* --- HEADER --- */
+.app-header {
+  height: 32px;
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 0.85em;
+  font-weight: 600;
+  user-select: none;
 }
 
-.title {
-  font-size: 2em;
-  font-weight: 700;
-  background: linear-gradient(to right, #646cff, #42b883);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.brand {
+  color: var(--text-dim);
+  letter-spacing: 1px;
 }
 
-.status-display {
+.app-status {
   font-family: monospace;
-  font-size: 1.2em;
-  color: #ccc;
-  min-height: 1.5em;
+  color: var(--text-main);
 }
 
-.record-btn {
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  border: 4px solid #444;
-  background-color: #ff4444;
-  color: white;
-  font-size: 1.5em;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.3s ease;
+/* --- PREVIEW SECTION --- */
+.preview-section {
+  flex: 1;
+  background-color: #111;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 20px rgba(255, 68, 68, 0.2);
+  padding: 16px;
+  overflow: hidden;
 }
 
-.record-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 30px rgba(255, 68, 68, 0.4);
+.preview-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000;
+  border: 1px solid var(--border-color);
+  position: relative;
+  max-width: 1280px;
+  max-height: 720px;
+  aspect-ratio: 16 / 9;
 }
 
-.record-btn.recording {
+.preview-player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.preview-placeholder {
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.placeholder-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.5;
+}
+
+.placeholder-content .icon {
+  font-size: 3em;
+}
+
+/* --- CONTROL DOCK --- */
+.control-dock {
+  height: 180px;
+  background-color: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: row;
+  padding: 8px;
+  gap: 8px;
+}
+
+.dock-column {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dock-column h4 {
+  margin: 0 0 4px 0;
+  font-size: 0.75em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 4px;
+}
+
+/* Specific Columns */
+.source-panel {
+  flex: 2;
+  min-width: 250px;
+}
+
+.settings-panel {
+  flex: 2;
+  min-width: 250px;
+}
+
+.action-panel {
+  flex: 1;
+  min-width: 150px;
+  align-items: center;
+  justify-content: center;
   background-color: transparent;
-  border-color: #ff4444;
-  color: #ff4444;
-  animation: pulse 2s infinite;
+  /* No card bg for button area */
+  border: none;
 }
 
-.record-btn.recording:hover {
-  background-color: rgba(255, 68, 68, 0.1);
+/* Form Controls */
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-@keyframes pulse {
+.control-group label {
+  font-size: 0.8em;
+  color: var(--text-dim);
+}
+
+.control-group.row {
+  flex-direction: row;
+  gap: 12px;
+}
+
+.half {
+  flex: 1;
+}
+
+.input-row {
+  display: flex;
+  gap: 4px;
+}
+
+select,
+input.text-input {
+  background-color: var(--bg-input);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.9em;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+input.text-input:focus,
+select:focus {
+  outline: 1px solid var(--highlight-color);
+}
+
+button.icon-btn {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 3px;
+  width: 32px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.icon-btn:hover {
+  background-color: var(--highlight-color);
+}
+
+/* Checkbox */
+.checkbox-container {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  padding-bottom: 6px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9em;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--highlight-color);
+}
+
+/* Main Record Button */
+.main-record-btn {
+  width: 100%;
+  height: 100%;
+  max-width: 120px;
+  max-height: 120px;
+  border-radius: 4px;
+  background-color: var(--bg-input);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.main-record-btn:active {
+  transform: translateY(1px);
+}
+
+.main-record-btn:not(.recording) {
+  background-color: var(--bg-panel);
+}
+
+.main-record-btn:not(.recording):hover {
+  background-color: var(--highlight-color);
+}
+
+.main-record-btn.recording {
+  background-color: var(--record-active);
+  color: white;
+  border-color: #ff5555;
+  animation: pulse-border 2s infinite;
+}
+
+.main-record-btn.recording:hover {
+  background-color: #ff0000;
+}
+
+@keyframes pulse-border {
   0% {
     box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.4);
   }
 
   70% {
-    box-shadow: 0 0 0 20px rgba(255, 68, 68, 0);
+    box-shadow: 0 0 0 6px rgba(255, 68, 68, 0);
   }
 
   100% {
@@ -94,20 +301,8 @@ body {
   }
 }
 
-.settings {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
-  max-width: 300px;
-  text-align: left;
-}
-
-input {
-  padding: 0.5rem;
-  border-radius: 4px;
-  border: 1px solid #444;
-  background: #2a2a2a;
-  color: white;
-  font-family: monospace;
+/* Disabled states */
+:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
