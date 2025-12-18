@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./App.css";
 
 function App() {
@@ -52,15 +52,8 @@ function App() {
         setIsRecording(false);
         setStatus("Saved!");
         // Update preview
-        // Note: convertFileSrc needs to be imported if we want to play local files comfortably
-        // or we just use the raw path if the WebView allows it (Video usually doesn't without protocol).
-        // Let's rely on user entering a valid absolute path for now.
-        // Actually, for playing local files in Tauri v2, we usually need the asset protocol or similar.
-        // Since we are not setting up the asset scope yet, we might have issues playing back unless we fix 'convertFileSrc'.
-        // Let's assume standard file:// works for now or add convertFileSrc.
-        // Importing convertFileSrc from @tauri-apps/api/core
-        const { convertFileSrc } = await import('@tauri-apps/api/core');
         setPreviewSrc(convertFileSrc(filename));
+
 
       } else {
         setStatus("Starting...");
