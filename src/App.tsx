@@ -39,19 +39,23 @@ function App() {
 
   const [showOverlay, setShowOverlay] = useState(false);
   const [fps, setFps] = useState("60");
-  const [previewSrc, setPreviewSrc] = useState("");
   const [livePreviewSrc, setLivePreviewSrc] = useState("");
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    async function setupListener() {
+
+    async function setup() {
+      // Start preview immediately
+      await invoke("start_preview");
       unlisten = await listen<string>('preview-frame', (event) => {
         setLivePreviewSrc(`data:image/jpeg;base64,${event.payload}`);
       });
     }
-    setupListener();
+    setup();
+
     return () => {
       if (unlisten) unlisten();
+      invoke("stop_preview");
     };
   }, []);
 
@@ -68,10 +72,6 @@ function App() {
         await invoke("stop_recording");
         setIsRecording(false);
         setStatus("Saved!");
-        // Update preview
-        setPreviewSrc(convertFileSrc(filename));
-
-
       } else {
         setStatus("Starting...");
 
@@ -89,8 +89,6 @@ function App() {
         await invoke("start_recording", { filename, fps, target });
         setIsRecording(true);
         setStatus("Recording...");
-        setPreviewSrc(""); // Clear file preview
-        setLivePreviewSrc(""); // Clear old live preview
       }
 
     } catch (error) {
@@ -109,28 +107,15 @@ function App() {
 
       <section className="preview-section">
         <div className="preview-container">
-          {isRecording ? (
-            livePreviewSrc ? (
-              <img src={livePreviewSrc} className="preview-player" alt="Live Preview" />
-            ) : (
-              <div className="preview-placeholder">
-                <div className="placeholder-content">
-                  <span className="icon">🔴</span>
-                  <span>Recording...</span>
-                </div>
-              </div>
-            )
+          {livePreviewSrc ? (
+            <img src={livePreviewSrc} className="preview-player" alt="Live Preview" />
           ) : (
-            previewSrc ? (
-              <video src={previewSrc} controls className="preview-player" />
-            ) : (
-              <div className="preview-placeholder">
-                <div className="placeholder-content">
-                  <span className="icon">📺</span>
-                  <span>No Preview Available</span>
-                </div>
+            <div className="preview-placeholder">
+              <div className="placeholder-content">
+                <span className="icon">📺</span>
+                <span>Starting preview...</span>
               </div>
-            )
+            </div>
           )}
         </div>
 

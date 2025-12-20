@@ -1,6 +1,6 @@
  mod recorder;
 
-use recorder::RecorderState;
+use recorder::{RecorderState, PreviewState};
 
 use tauri::Manager;
 
@@ -45,6 +45,8 @@ tauri::Builder::default()
 
 .manage(RecorderState::new())
 
+.manage(PreviewState::new())
+
 .plugin(tauri_plugin_opener::init())
 
 .invoke_handler(tauri::generate_handler![
@@ -57,6 +59,10 @@ recorder::stop_recording,
 
 recorder::get_open_windows,
 
+recorder::start_preview,
+
+recorder::stop_preview,
+
 toggle_overlay
 
 ])
@@ -65,4 +71,5 @@ toggle_overlay
 
 .expect("error while running tauri application");
 
-} 
+}
+ 

@@ -39,24 +39,128 @@ use image::{ImageBuffer, Rgba, imageops, GenericImageView};
 
 
 pub struct RecorderState {
-
     pub is_recording: Arc<AtomicBool>,
-
 }
 
-
 impl RecorderState {
-
     pub fn new() -> Self {
-
         Self {
-
             is_recording: Arc::new(AtomicBool::new(false)),
-
         }
+    }
+}
 
+// Preview-only state
+pub struct PreviewState {
+    pub is_previewing: Arc<AtomicBool>,
+}
+
+impl PreviewState {
+    pub fn new() -> Self {
+        Self {
+            is_previewing: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+// Preview-only flags (no ffmpeg)
+struct PreviewFlags {
+    stop_signal: Arc<AtomicBool>,
+    app_handle: AppHandle,
+}
+
+// Preview handler - only captures frames for display
+struct PreviewHandler {
+    stop_signal: Arc<AtomicBool>,
+    app_handle: AppHandle,
+    frame_count: u64,
+}
+
+impl GraphicsCaptureApiHandler for PreviewHandler {
+    type Flags = PreviewFlags;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            stop_signal: ctx.flags.stop_signal,
+            app_handle: ctx.flags.app_handle,
+            frame_count: 0,
+        })
     }
 
+    fn on_frame_arrived(&mut self, frame: &mut Frame, capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
+        if !self.stop_signal.load(Ordering::Relaxed) {
+            capture_control.stop();
+            return Ok(());
+        }
+
+        self.frame_count += 1;
+        if self.frame_count % 5 == 0 {
+            let width = frame.width();
+            let height = frame.height();
+            let mut buffer_obj = frame.buffer()?;
+            let src_data = buffer_obj.as_raw_buffer();
+            
+            let img_buffer: Option<image::ImageBuffer<image::Rgba<u8>, &[u8]>> = 
+                image::ImageBuffer::from_raw(width, height, src_data);
+            
+            if let Some(img) = img_buffer {
+                let resized = image::imageops::resize(&img, 480, (480 * height) / width, image::imageops::FilterType::Nearest);
+                let mut jpg_data = Vec::new();
+                let mut cursor = Cursor::new(&mut jpg_data);
+                if let Ok(_) = resized.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(50)) {
+                    let base64_str = base64::encode(&jpg_data);
+                    let _ = self.app_handle.emit("preview-frame", base64_str);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn on_closed(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn start_preview(app_handle: AppHandle, state: State<'_, PreviewState>) -> Result<(), String> {
+    if state.is_previewing.load(Ordering::Relaxed) {
+        return Ok(()); // Already previewing
+    }
+    
+    state.is_previewing.store(true, Ordering::Relaxed);
+    let signal = state.is_previewing.clone();
+    
+    thread::spawn(move || {
+        let primary_monitor = Monitor::primary().expect("No primary monitor");
+        
+        let flags = PreviewFlags {
+            stop_signal: signal.clone(),
+            app_handle,
+        };
+
+        let settings = Settings::new(
+            primary_monitor,
+            CursorCaptureSettings::Default,
+            DrawBorderSettings::Default,
+            SecondaryWindowSettings::Default,
+            MinimumUpdateIntervalSettings::Default,
+            DirtyRegionSettings::Default,
+            ColorFormat::Bgra8,
+            flags,
+        );
+
+        let _ = PreviewHandler::start(settings);
+        signal.store(false, Ordering::Relaxed);
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_preview(state: State<'_, PreviewState>) -> Result<(), String> {
+    state.is_previewing.store(false, Ordering::Relaxed);
+    Ok(())
 }
 
 
