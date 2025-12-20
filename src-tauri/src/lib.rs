@@ -61,9 +61,7 @@ recorder::get_open_windows,
 
 recorder::start_preview,
 
-recorder::stop_preview,
-
-toggle_overlay
+recorder::stop_preview
 
 ])
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
@@ -37,7 +37,6 @@ function App() {
     }
   };
 
-  const [showOverlay, setShowOverlay] = useState(false);
   const [fps, setFps] = useState("60");
   const [livePreviewSrc, setLivePreviewSrc] = useState("");
 
@@ -48,7 +47,7 @@ function App() {
       // Start preview immediately
       await invoke("start_preview");
       unlisten = await listen<string>('preview-frame', (event) => {
-        setLivePreviewSrc(`data:image/jpeg;base64,${event.payload}`);
+        setLivePreviewSrc(`data:image/png;base64,${event.payload}`);
       });
     }
     setup();
@@ -59,11 +58,6 @@ function App() {
     };
   }, []);
 
-
-  const toggleOverlay = async (show: boolean) => {
-    setShowOverlay(show);
-    await invoke("toggle_overlay", { show });
-  };
 
   const toggleRecording = async () => {
     try {
@@ -166,22 +160,12 @@ function App() {
             />
           </div>
           <div className="control-group row">
-            <div className="half">
+            <div>
               <label>FPS</label>
               <select value={fps} onChange={(e) => setFps(e.target.value)} disabled={isRecording}>
                 <option value="30">30</option>
                 <option value="60">60</option>
               </select>
-            </div>
-            <div className="half checkbox-container">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={showOverlay}
-                  onChange={(e) => toggleOverlay(e.target.checked)}
-                />
-                Effects
-              </label>
             </div>
           </div>
         </div>

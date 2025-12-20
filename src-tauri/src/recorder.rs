@@ -95,21 +95,42 @@ impl GraphicsCaptureApiHandler for PreviewHandler {
         }
 
         self.frame_count += 1;
-        if self.frame_count % 5 == 0 {
+        if self.frame_count % 2 == 0 {
             let width = frame.width();
             let height = frame.height();
             let mut buffer_obj = frame.buffer()?;
             let src_data = buffer_obj.as_raw_buffer();
             
-            let img_buffer: Option<image::ImageBuffer<image::Rgba<u8>, &[u8]>> = 
-                image::ImageBuffer::from_raw(width, height, src_data);
+            // Handle stride/padding - copy to tight buffer
+            let row_pitch = src_data.len() / height as usize;
+            let tight_pitch = (width * 4) as usize;
+            
+            let mut rgba_data = vec![0u8; (width * height * 4) as usize];
+            
+            for y in 0..height as usize {
+                let src_start = y * row_pitch;
+                let dst_start = y * tight_pitch;
+                for x in 0..width as usize {
+                    let src_idx = src_start + x * 4;
+                    let dst_idx = dst_start + x * 4;
+                    if src_idx + 3 < src_data.len() {
+                        // BGRA → RGBA swap
+                        rgba_data[dst_idx] = src_data[src_idx + 2];     // R
+                        rgba_data[dst_idx + 1] = src_data[src_idx + 1]; // G
+                        rgba_data[dst_idx + 2] = src_data[src_idx];     // B
+                        rgba_data[dst_idx + 3] = src_data[src_idx + 3]; // A
+                    }
+                }
+            }
+            
+            let img_buffer: Option<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>> = 
+                image::ImageBuffer::from_raw(width, height, rgba_data);
             
             if let Some(img) = img_buffer {
-                let resized = image::imageops::resize(&img, 480, (480 * height) / width, image::imageops::FilterType::Nearest);
-                let mut jpg_data = Vec::new();
-                let mut cursor = Cursor::new(&mut jpg_data);
-                if let Ok(_) = resized.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(50)) {
-                    let base64_str = base64::encode(&jpg_data);
+                let mut png_data = Vec::new();
+                let mut cursor = Cursor::new(&mut png_data);
+                if let Ok(_) = img.write_to(&mut cursor, image::ImageOutputFormat::Png) {
+                    let base64_str = base64::encode(&png_data);
                     let _ = self.app_handle.emit("preview-frame", base64_str);
                 }
             }
