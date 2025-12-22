@@ -15,8 +15,8 @@ use windows_capture::{
         SecondaryWindowSettings, MinimumUpdateIntervalSettings, DirtyRegionSettings
     },
     monitor::Monitor,
+    window::Window,
 };
-
 
 pub struct RecorderState {
     pub is_recording: Arc<AtomicBool>,
@@ -39,17 +39,13 @@ struct CaptureFlags {
     fps: String,
 }
 
-
-
 // Capture Handler with constant framerate output
 struct CaptureHandler {
     ffmpeg_process: std::process::Child,
     stop_signal: Arc<AtomicBool>,
-    // Constant framerate fields
     recording_start: Option<Instant>,
     frames_written: u64,
     target_fps: f64,
-    // Cached frame data for duplication
     last_frame: Vec<u8>,
     frame_width: u32,
     frame_height: u32,
@@ -97,7 +93,6 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         })
     }
 
-
     fn on_frame_arrived(&mut self, frame: &mut Frame, capture_control: InternalCaptureControl) -> Result<(), Self::Error> {
         if !self.stop_signal.load(Ordering::Relaxed) {
             capture_control.stop();
@@ -109,12 +104,10 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let mut buffer_obj = frame.buffer()?;
         let src_data = buffer_obj.as_raw_buffer();
 
-        // Calculate pitches
         let row_pitch = src_data.len() / height as usize;
         let tight_pitch = (width * 4) as usize;
         let frame_size = (self.frame_width * self.frame_height * 4) as usize;
 
-        // Extract tight frame data (remove padding) - reuse buffer
         if self.last_frame.len() != frame_size {
             self.last_frame = vec![0u8; frame_size];
         }
@@ -122,7 +115,6 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         if row_pitch == tight_pitch && width == self.frame_width && height == self.frame_height {
             self.last_frame.copy_from_slice(&src_data[..frame_size]);
         } else {
-            // Copy row by row, removing padding
             for i in 0..self.frame_height as usize {
                 let src_start = i * row_pitch;
                 let dst_start = i * (self.frame_width * 4) as usize;
@@ -134,17 +126,14 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             }
         }
 
-        // Initialize recording start time on first frame
         let now = Instant::now();
         if self.recording_start.is_none() {
             self.recording_start = Some(now);
         }
 
-        // Calculate expected frames based on elapsed time
         let elapsed = now.duration_since(self.recording_start.unwrap());
         let expected_frames = (elapsed.as_secs_f64() * self.target_fps).ceil() as u64;
 
-        // Write frames to catch up to expected count
         if let Some(stdin) = self.ffmpeg_process.stdin.as_mut() {
             while self.frames_written < expected_frames {
                 stdin.write_all(&self.last_frame)?;
@@ -155,69 +144,58 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         Ok(())
     }
 
-
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-
         println!("Capture closed. Cleaning up ffmpeg.");
-
         if let Some(stdin) = self.ffmpeg_process.stdin.take() {
-
             drop(stdin);
-
         }
-
         self.ffmpeg_process.wait()?;
-
         println!("FFmpeg finished.");
-
         Ok(())
-
     }
-
 }
 
-
-// Window Info Structs for list_windows command
-
-#[derive(serde::Serialize)]
-
+// Window Info for frontend
+#[derive(serde::Serialize, Clone)]
 pub struct WindowInfo {
-
-    id: u32,
-
-    title: String,
-
+    pub id: isize,  // HWND as isize
+    pub title: String,
 }
 
-
 #[tauri::command]
-
 pub fn get_open_windows() -> Vec<WindowInfo> {
-
-    // Stubbed to avoid compilation errors with Window API
-
-    // We will just return empty list for now since we record primary monitor
-
-    Vec::new()
-
+    let mut result = Vec::new();
+    
+    if let Ok(windows) = Window::enumerate() {
+        for window in windows {
+            // Only include valid windows with non-empty titles
+            if window.is_valid() {
+                if let Ok(title) = window.title() {
+                    if !title.is_empty() {
+                        // Get raw HWND as isize for serialization
+                        let hwnd_ptr = window.as_raw_hwnd();
+                        result.push(WindowInfo {
+                            id: hwnd_ptr as isize,
+                            title,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    result
 }
 
-
-#[derive(serde::Deserialize)]
-
+#[derive(serde::Deserialize, Debug)]
 pub struct RecordTarget {
-
     #[serde(rename = "type")]
-
-    target_type: String,
-
-    id: Option<u32>,
-
+    pub target_type: String,
+    pub id: Option<i64>,  // HWND as i64 for JSON compatibility
 }
-
 
 #[tauri::command]
-pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: String, _target: Option<RecordTarget>) -> Result<(), String> {
+pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: String, target: Option<RecordTarget>) -> Result<(), String> {
     if state.is_recording.load(Ordering::Relaxed) {
         return Err("Already recording".to_string());
     }
@@ -226,73 +204,89 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
     let signal = state.is_recording.clone();
    
     thread::spawn(move || {
-        let primary_monitor = Monitor::primary().expect("No primary monitor");
-        let width = primary_monitor.width().expect("Failed to get monitor width");
-        let height = primary_monitor.height().expect("Failed to get monitor height");
-           
-        let flags = CaptureFlags {
-            filename,
-            stop_signal: signal.clone(),
-            width,
-            height,
-            fps,
+        // Determine capture source based on target
+        let capture_result = match &target {
+            Some(t) if t.target_type == "window" && t.id.is_some() => {
+                // Window capture
+                let hwnd = t.id.unwrap() as isize as *mut std::ffi::c_void;
+                let window = Window::from_raw_hwnd(hwnd);
+                
+                println!("Capturing window: {:?}", window.title());
+                
+                // Get window dimensions
+                let rect = window.rect().map_err(|e| format!("Failed to get window rect: {:?}", e))?;
+                let width = (rect.right - rect.left) as u32;
+                let height = (rect.bottom - rect.top) as u32;
+                
+                let flags = CaptureFlags {
+                    filename,
+                    stop_signal: signal.clone(),
+                    width,
+                    height,
+                    fps,
+                };
+
+                let settings = Settings::new(
+                    window,
+                    CursorCaptureSettings::Default,
+                    DrawBorderSettings::Default,
+                    SecondaryWindowSettings::Default,
+                    MinimumUpdateIntervalSettings::Default,
+                    DirtyRegionSettings::Default,
+                    ColorFormat::Bgra8,
+                    flags,
+                );
+
+                CaptureHandler::start(settings)
+            }
+            _ => {
+                // Monitor capture (default)
+                let primary_monitor = Monitor::primary().expect("No primary monitor");
+                let width = primary_monitor.width().expect("Failed to get monitor width");
+                let height = primary_monitor.height().expect("Failed to get monitor height");
+                
+                println!("Capturing primary monitor: {}x{}", width, height);
+                   
+                let flags = CaptureFlags {
+                    filename,
+                    stop_signal: signal.clone(),
+                    width,
+                    height,
+                    fps,
+                };
+
+                let settings = Settings::new(
+                    primary_monitor,
+                    CursorCaptureSettings::Default,
+                    DrawBorderSettings::Default,
+                    SecondaryWindowSettings::Default,
+                    MinimumUpdateIntervalSettings::Default,
+                    DirtyRegionSettings::Default,
+                    ColorFormat::Bgra8,
+                    flags,
+                );
+
+                CaptureHandler::start(settings)
+            }
         };
 
-
-
-        let settings = Settings::new(
-
-            primary_monitor,
-
-            CursorCaptureSettings::Default,
-
-            DrawBorderSettings::Default,
-
-            SecondaryWindowSettings::Default,
-
-            MinimumUpdateIntervalSettings::Default,
-
-            DirtyRegionSettings::Default,
-
-            ColorFormat::Bgra8,
-
-            flags,
-
-        );
-
-
-        match CaptureHandler::start(settings) {
-
+        match capture_result {
             Ok(_) => println!("Recording finished successfully"),
-
             Err(e) => eprintln!("Recording error: {:?}", e),
-
         }
 
-       
-
         signal.store(false, Ordering::Relaxed);
-
+        Ok::<(), String>(())
     });
 
-
     Ok(())
-
 }
 
-
 #[tauri::command]
-
 pub fn stop_recording(state: State<'_, RecorderState>) -> Result<(), String> {
-
     if !state.is_recording.load(Ordering::Relaxed) {
-
         return Err("Not recording".to_string());
-
     }
-
     state.is_recording.store(false, Ordering::Relaxed);
-
     Ok(())
-
-} 
+}

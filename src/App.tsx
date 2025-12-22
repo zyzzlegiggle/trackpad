@@ -14,6 +14,7 @@ function App() {
   const [filename, setFilename] = useState("");
   const [windows, setWindows] = useState<WindowInfo[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<string>("monitor");
+  const [selectedLabel, setSelectedLabel] = useState("Full Screen");
   const [showSourceModal, setShowSourceModal] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
 
@@ -96,8 +97,9 @@ function App() {
     }
   };
 
-  const selectSource = (id: string) => {
+  const selectSource = (id: string, label: string) => {
     setSelectedTarget(id);
+    setSelectedLabel(label);
     setShowSourceModal(false);
   };
 
@@ -135,7 +137,7 @@ function App() {
               <line x1="8" y1="21" x2="16" y2="21" />
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
-            <span>Source</span>
+            <span>{selectedLabel.length > 12 ? selectedLabel.substring(0, 12) + "..." : selectedLabel}</span>
           </button>
 
           <button
@@ -173,7 +175,7 @@ function App() {
               <div className="source-list">
                 <button
                   className={`source-item ${selectedTarget === "monitor" ? "selected" : ""}`}
-                  onClick={() => selectSource("monitor")}
+                  onClick={() => selectSource("monitor", "Full Screen")}
                 >
                   <div className="source-item-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -182,13 +184,13 @@ function App() {
                       <line x1="12" y1="17" x2="12" y2="21" />
                     </svg>
                   </div>
-                  <span className="source-item-text">Primary Monitor</span>
+                  <span className="source-item-text">Full Screen</span>
                 </button>
                 {windows.map((w) => (
                   <button
                     key={w.id}
                     className={`source-item ${selectedTarget === w.id.toString() ? "selected" : ""}`}
-                    onClick={() => selectSource(w.id.toString())}
+                    onClick={() => selectSource(w.id.toString(), w.title)}
                   >
                     <div className="source-item-icon">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
