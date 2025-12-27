@@ -16,9 +16,12 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const [trimEnd, setTrimEnd] = useState(0);
     const [isExporting, setIsExporting] = useState(false);
     const [exportStatus, setExportStatus] = useState("");
+    const [videoLoaded, setVideoLoaded] = useState(false);
+    const [videoError, setVideoError] = useState("");
 
     // Convert file path to asset URL for video playback
-    const videoUrl = `asset://localhost/${videoPath.replace(/\\/g, "/").replace("C:/", "")}`;
+    // e.g. C:\Users\josse\AppData\Local\Temp\file.mp4 → asset://localhost/Users/josse/AppData/Local/Temp/file.mp4
+    const videoUrl = `asset://localhost/${videoPath.replace(/\\/g, "/").replace(/^[A-Za-z]:\//, "")}`;
 
     useEffect(() => {
         const video = videoRef.current;
@@ -27,6 +30,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         const handleLoadedMetadata = () => {
             setDuration(video.duration);
             setTrimEnd(video.duration);
+            setVideoLoaded(true);
+            setVideoError("");
         };
 
         const handleTimeUpdate = () => {
@@ -38,12 +43,19 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
             }
         };
 
+        const handleError = () => {
+            console.error("Video load error:", video.error);
+            setVideoError(`Failed to load video: ${video.error?.message || "Unknown error"}`);
+        };
+
         video.addEventListener("loadedmetadata", handleLoadedMetadata);
         video.addEventListener("timeupdate", handleTimeUpdate);
+        video.addEventListener("error", handleError);
 
         return () => {
             video.removeEventListener("loadedmetadata", handleLoadedMetadata);
             video.removeEventListener("timeupdate", handleTimeUpdate);
+            video.removeEventListener("error", handleError);
         };
     }, [trimEnd]);
 
@@ -105,13 +117,34 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         setExportStatus("Trimming video...");
 
         try {
-            const outputPath = videoPath.replace(".mp4", "_edited.mp4");
+            // Generate final output path in Videos folder
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            const finalName = `recording_${timestamp}_edited.mp4`;
+
+            // Get Videos folder path and trim directly there
+            const videosDir = await invoke<string>("move_video_to_videos", {
+                tempPath: videoPath,
+                finalName: `temp_${finalName}` // Temporary name
+            });
+
+            // Trim the video in Videos folder
+            const inputPath = videosDir;
+            const outputPath = inputPath.replace(`temp_${finalName}`, finalName);
+
             await invoke("trim_video", {
-                inputPath: videoPath,
+                inputPath,
                 outputPath,
                 startTime: trimStart,
                 endTime: trimEnd,
             });
+
+            // Delete the temp copy
+            try {
+                await invoke("delete_temp_video", { tempPath: inputPath });
+            } catch (e) {
+                console.warn("Failed to cleanup temp file:", e);
+            }
+
             setExportStatus("Saved!");
             setTimeout(() => {
                 onClose();
@@ -123,9 +156,28 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         }
     };
 
-    const handleSaveOriginal = () => {
-        // Just close without trimming - original is already saved
-        onClose();
+    const handleSaveOriginal = async () => {
+        setIsExporting(true);
+        setExportStatus("Saving...");
+
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            const finalName = `recording_${timestamp}.mp4`;
+
+            await invoke("move_video_to_videos", {
+                tempPath: videoPath,
+                finalName
+            });
+
+            setExportStatus("Saved!");
+            setTimeout(() => {
+                onClose();
+            }, 1000);
+        } catch (error) {
+            console.error("Save failed:", error);
+            setExportStatus("Save failed");
+            setIsExporting(false);
+        }
     };
 
     return (
@@ -144,14 +196,24 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
 
                 {/* Video Preview */}
                 <div className="video-container">
+                    {videoError && (
+                        <div className="video-error">
+                            <span>{videoError}</span>
+                            <small>Path: {videoPath}</small>
+                        </div>
+                    )}
+                    {!videoLoaded && !videoError && (
+                        <div className="video-loading">Loading video...</div>
+                    )}
                     <video
                         ref={videoRef}
                         src={videoUrl}
                         className="video-player"
                         onClick={togglePlay}
+                        style={{ display: videoError ? 'none' : 'block' }}
                     />
                     <div className="video-overlay" onClick={togglePlay}>
-                        {!isPlaying && (
+                        {!isPlaying && videoLoaded && (
                             <div className="play-button-overlay">
                                 <svg viewBox="0 0 24 24" fill="currentColor">
                                     <polygon points="5,3 19,12 5,21" />

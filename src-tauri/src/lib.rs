@@ -21,6 +21,28 @@ fn toggle_overlay(app: tauri::AppHandle, show: bool) {
 }
 
 #[tauri::command]
+fn get_temp_video_path() -> Result<String, String> {
+    let temp_dir = std::env::temp_dir();
+    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let path = temp_dir.join(format!("visualcoder_recording_{}.mp4", timestamp));
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn move_video_to_videos(temp_path: String, final_name: String) -> Result<String, String> {
+    let videos_dir = dirs::video_dir().ok_or("Could not find Videos directory")?;
+    let final_path = videos_dir.join(&final_name);
+    std::fs::copy(&temp_path, &final_path).map_err(|e| format!("Failed to copy video: {}", e))?;
+    std::fs::remove_file(&temp_path).ok(); // Cleanup temp, ignore errors
+    Ok(final_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn delete_temp_video(temp_path: String) -> Result<(), String> {
+    std::fs::remove_file(&temp_path).map_err(|e| format!("Failed to delete temp video: {}", e))
+}
+
+#[tauri::command]
 async fn trim_video(
     input_path: String,
     output_path: String,
@@ -60,7 +82,10 @@ pub fn run() {
             recorder::start_recording,
             recorder::stop_recording,
             recorder::get_open_windows,
-            trim_video
+            trim_video,
+            get_temp_video_path,
+            move_video_to_videos,
+            delete_temp_video
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

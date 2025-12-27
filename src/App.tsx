@@ -25,9 +25,19 @@ function App() {
   // const [livePreviewSrc, setLivePreviewSrc] = useState("");
 
   useEffect(() => {
-    const date = new Date();
-    const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+    const initTempPath = async () => {
+      try {
+        const tempPath = await invoke<string>("get_temp_video_path");
+        setFilename(tempPath);
+      } catch (e) {
+        console.error("Failed to get temp path", e);
+        // Fallback to videos folder
+        const date = new Date();
+        const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+      }
+    };
+    initTempPath();
     refreshWindows();
   }, []);
 
@@ -81,6 +91,11 @@ function App() {
         setStatus("Saving...");
         await invoke("stop_recording");
         setIsRecording(false);
+
+        // Wait for FFmpeg to finish writing the file
+        // stop_recording only signals the thread to stop, it doesn't wait for FFmpeg to complete
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
         setStatus("Saved!");
         // Open editor with the recorded file
         setLastRecordedFile(filename);
@@ -108,13 +123,19 @@ function App() {
     setShowSourceModal(false);
   };
 
-  const handleEditorClose = () => {
+  const handleEditorClose = async () => {
     setEditorMode(false);
     setStatus("Ready");
-    // Generate new filename for next recording
-    const date = new Date();
-    const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+    // Generate new temp path for next recording
+    try {
+      const tempPath = await invoke<string>("get_temp_video_path");
+      setFilename(tempPath);
+    } catch (e) {
+      console.error("Failed to get temp path", e);
+      const date = new Date();
+      const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+    }
   };
 
   // Show editor if in editor mode
