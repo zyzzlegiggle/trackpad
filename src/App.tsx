@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 // import { listen } from "@tauri-apps/api/event"; // Uncomment for preview feature
 import "./App.css";
+import VideoEditor from "./VideoEditor";
 
 interface WindowInfo {
   id: number;
@@ -17,6 +18,8 @@ function App() {
   const [selectedLabel, setSelectedLabel] = useState("Full Screen");
   const [showSourceModal, setShowSourceModal] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [editorMode, setEditorMode] = useState(false);
+  const [lastRecordedFile, setLastRecordedFile] = useState("");
 
   // Preview state - uncomment to enable
   // const [livePreviewSrc, setLivePreviewSrc] = useState("");
@@ -79,7 +82,9 @@ function App() {
         await invoke("stop_recording");
         setIsRecording(false);
         setStatus("Saved!");
-        setTimeout(() => setStatus("Ready"), 2000);
+        // Open editor with the recorded file
+        setLastRecordedFile(filename);
+        setEditorMode(true);
       } else {
         setStatus("Starting...");
         const target = selectedTarget !== "monitor"
@@ -102,6 +107,20 @@ function App() {
     setSelectedLabel(label);
     setShowSourceModal(false);
   };
+
+  const handleEditorClose = () => {
+    setEditorMode(false);
+    setStatus("Ready");
+    // Generate new filename for next recording
+    const date = new Date();
+    const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+  };
+
+  // Show editor if in editor mode
+  if (editorMode && lastRecordedFile) {
+    return <VideoEditor videoPath={lastRecordedFile} onClose={handleEditorClose} />;
+  }
 
   return (
     <div className="app-container">
