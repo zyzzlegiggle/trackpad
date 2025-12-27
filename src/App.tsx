@@ -31,10 +31,7 @@ function App() {
         setFilename(tempPath);
       } catch (e) {
         console.error("Failed to get temp path", e);
-        // Fallback to videos folder
-        const date = new Date();
-        const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+        setStatus("Error: Could not get temp path");
       }
     };
     initTempPath();
@@ -132,9 +129,7 @@ function App() {
       setFilename(tempPath);
     } catch (e) {
       console.error("Failed to get temp path", e);
-      const date = new Date();
-      const timestamp = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      setFilename(`C:/Users/josse/Videos/recording_${timestamp}.mp4`);
+      setStatus("Error: Could not get temp path");
     }
   };
 

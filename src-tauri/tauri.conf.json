@@ -35,8 +35,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "C:/Users/josse/Videos/**",
-          "C:/Users/josse/AppData/Local/Temp/**"
+          "$VIDEO/**",
+          "$TEMP/**"
         ]
       }
     }
