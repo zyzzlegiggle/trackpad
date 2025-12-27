@@ -36,7 +36,7 @@
         "enable": true,
         "scope": [
           "C:/Users/josse/Videos/**",
-          "C:/Users/*/AppData/Local/Temp/**"
+          "C:/Users/josse/AppData/Local/Temp/**"
         ]
       }
     }

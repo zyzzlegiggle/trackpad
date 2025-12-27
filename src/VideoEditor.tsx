@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./VideoEditor.css";
 
 interface VideoEditorProps {
@@ -19,9 +19,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const [videoLoaded, setVideoLoaded] = useState(false);
     const [videoError, setVideoError] = useState("");
 
-    // Convert file path to asset URL for video playback
-    // e.g. C:\Users\josse\AppData\Local\Temp\file.mp4 → asset://localhost/Users/josse/AppData/Local/Temp/file.mp4
-    const videoUrl = `asset://localhost/${videoPath.replace(/\\/g, "/").replace(/^[A-Za-z]:\//, "")}`;
+    // Use Tauri's convertFileSrc for proper asset URL conversion
+    const videoUrl = convertFileSrc(videoPath);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -45,6 +44,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
 
         const handleError = () => {
             console.error("Video load error:", video.error);
+            console.error("Video path:", videoPath);
+            console.error("Video URL:", videoUrl);
             setVideoError(`Failed to load video: ${video.error?.message || "Unknown error"}`);
         };
 
