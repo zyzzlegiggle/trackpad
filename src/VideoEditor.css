@@ -230,7 +230,7 @@
     background: #d97706;
 }
 
-/* Timeline Wrapper - Compact */
+/* Timeline Wrapper - Flexible height for multi-lane */
 .timeline-wrapper {
     display: flex;
     flex-direction: column;
@@ -240,6 +240,7 @@
     padding: 8px 10px;
     border: 1px solid #e5e5e7;
     flex-shrink: 0;
+    min-height: 60px;
 }
 
 /* Time Markers */
@@ -268,6 +269,33 @@
     background: #ddd;
 }
 
+/* Scrollable Timeline Container */
+.timeline-scroll-container {
+    max-height: 150px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #c0c0c0 #f0f0f0;
+}
+
+.timeline-scroll-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.timeline-scroll-container::-webkit-scrollbar-track {
+    background: #f0f0f0;
+    border-radius: 3px;
+}
+
+.timeline-scroll-container::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border-radius: 3px;
+}
+
+.timeline-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #a0a0a0;
+}
+
 /* Timeline Tracks */
 .timeline-tracks {
     position: relative;
@@ -275,6 +303,7 @@
     flex-direction: column;
     gap: 4px;
     cursor: pointer;
+    min-height: 36px;
 }
 
 /* Track */
@@ -369,19 +398,33 @@
     min-height: 28px;
 }
 
+/* Effect Lane - for multi-lane layout */
+.effect-lane {
+    height: 36px;
+}
+
+.effect-lane .track-content {
+    background: #f0f0f2;
+}
+
 /* Effect Segment */
 .effect-segment {
     position: absolute;
-    top: 3px;
-    bottom: 3px;
+    top: 4px;
+    bottom: 4px;
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
+    cursor: grab;
     transition: box-shadow 0.2s ease;
     min-width: 30px;
     z-index: 2;
+    user-select: none;
+}
+
+.effect-segment:active {
+    cursor: grabbing;
 }
 
 .effect-segment:hover {
@@ -513,6 +556,7 @@
     width: 80px;
     height: 4px;
     -webkit-appearance: none;
+    appearance: none;
     background: #ddd;
     border-radius: 2px;
     cursor: pointer;

@@ -7,7 +7,7 @@ interface VideoEditorProps {
     onClose: () => void;
 }
 
-// Unified effect interface for all effect types
+// Unified effect interface with lane support
 type EffectType = 'zoom' | 'blur' | 'slowmo';
 
 interface Effect {
@@ -15,12 +15,13 @@ interface Effect {
     type: EffectType;
     startTime: number;
     endTime: number;
+    lane: number; // 0-indexed lane for effect placement
     // Type-specific properties
-    scale?: number;      // For zoom
-    targetX?: number;    // For zoom
-    targetY?: number;    // For zoom
-    intensity?: number;  // For blur
-    speed?: number;      // For slowmo
+    scale?: number;
+    targetX?: number;
+    targetY?: number;
+    intensity?: number;
+    speed?: number;
 }
 
 const EFFECT_CONFIG: Record<EffectType, { label: string; color: string; defaultDuration: number }> = {
@@ -29,9 +30,15 @@ const EFFECT_CONFIG: Record<EffectType, { label: string; color: string; defaultD
     slowmo: { label: 'Slow-Mo', color: '#f59e0b', defaultDuration: 3 },
 };
 
+// Check if two time ranges overlap
+const rangesOverlap = (s1: number, e1: number, s2: number, e2: number): boolean => {
+    return s1 < e2 && e1 > s2;
+};
+
 function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const timelineRef = useRef<HTMLDivElement>(null);
+    const tracksContainerRef = useRef<HTMLDivElement>(null);
 
     // Video state
     const [isPlaying, setIsPlaying] = useState(false);
@@ -40,7 +47,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const [videoLoaded, setVideoLoaded] = useState(false);
     const [videoError, setVideoError] = useState("");
 
-    // Trim state (video duration adjustment)
+    // Trim state
     const [trimStart, setTrimStart] = useState(0);
     const [trimEnd, setTrimEnd] = useState(0);
 
@@ -48,6 +55,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const [effects, setEffects] = useState<Effect[]>([]);
     const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState<string | null>(null);
+    const [dragStartY, setDragStartY] = useState<number>(0);
+    const [dragStartLane, setDragStartLane] = useState<number>(0);
 
     // Export state
     const [isExporting, setIsExporting] = useState(false);
@@ -55,10 +64,26 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
 
     const videoUrl = convertFileSrc(videoPath);
 
+    // Calculate the number of lanes needed
+    const laneCount = effects.length > 0 ? Math.max(...effects.map(e => e.lane)) + 1 : 0;
+
     // Get active effects at current playhead
     const activeEffects = effects.filter(
         e => currentTime >= e.startTime && currentTime <= e.endTime
     );
+
+    // Find the first available lane for a new effect at given time range
+    const findAvailableLane = (startTime: number, endTime: number, excludeId?: string): number => {
+        for (let lane = 0; lane <= laneCount; lane++) {
+            const overlapping = effects.some(e =>
+                e.id !== excludeId &&
+                e.lane === lane &&
+                rangesOverlap(startTime, endTime, e.startTime, e.endTime)
+            );
+            if (!overlapping) return lane;
+        }
+        return laneCount; // New lane at the end
+    };
 
     // Video event handlers
     useEffect(() => {
@@ -115,8 +140,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     // Timeline click to seek
     const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         if (!timelineRef.current || !videoRef.current || duration === 0) return;
-        // Only seek if clicking on the timeline background, not on handles
-        if ((e.target as HTMLElement).closest('.effect-segment, .trim-handle')) return;
+        if ((e.target as HTMLElement).closest('.effect-segment, .trim-handle, .effect-handle')) return;
 
         const rect = timelineRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -166,11 +190,16 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     // Effect functions
     const addEffect = (type: EffectType) => {
         const config = EFFECT_CONFIG[type];
+        const startTime = currentTime;
+        const endTime = Math.min(currentTime + config.defaultDuration, duration);
+        const lane = findAvailableLane(startTime, endTime);
+
         const newEffect: Effect = {
             id: `${type}-${Date.now()}`,
             type,
-            startTime: currentTime,
-            endTime: Math.min(currentTime + config.defaultDuration, duration),
+            startTime,
+            endTime,
+            lane,
         };
 
         // Add type-specific defaults
@@ -221,11 +250,25 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                 if (newTime > trimStart + 0.5) {
                     setTrimEnd(newTime);
                 }
+            } else if (isDragging.endsWith('-move')) {
+                // Moving entire effect (vertical lane change)
+                const effectId = isDragging.replace('-move', '');
+                const effect = effects.find(e => e.id === effectId);
+                if (effect && tracksContainerRef.current) {
+                    const deltaY = e.clientY - dragStartY;
+                    const laneHeight = 36; // Height of each lane
+                    const laneDelta = Math.round(deltaY / laneHeight);
+                    const newLane = Math.max(0, dragStartLane + laneDelta);
+
+                    if (newLane !== effect.lane) {
+                        updateEffect(effectId, { lane: newLane });
+                    }
+                }
             } else if (isDragging.includes('-start') || isDragging.includes('-end')) {
-                // Effect dragging: format is "effectId-start" or "effectId-end"
+                // Effect edge dragging
                 const parts = isDragging.split('-');
-                const edge = parts.pop(); // 'start' or 'end'
-                const effectId = parts.join('-'); // rejoin in case id has dashes
+                const edge = parts.pop();
+                const effectId = parts.join('-');
 
                 const effect = effects.find(e => e.id === effectId);
                 if (effect) {
@@ -243,6 +286,10 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         };
 
         const handleMouseUp = () => {
+            // Compact lanes after drag ends (remove empty lanes)
+            if (isDragging?.endsWith('-move')) {
+                compactLanes();
+            }
             setIsDragging(null);
         };
 
@@ -253,7 +300,28 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, duration, trimStart, trimEnd, effects]);
+    }, [isDragging, duration, trimStart, trimEnd, effects, dragStartY, dragStartLane]);
+
+    // Compact lanes to remove gaps
+    const compactLanes = () => {
+        const usedLanes = [...new Set(effects.map(e => e.lane))].sort((a, b) => a - b);
+        const laneMap = new Map<number, number>();
+        usedLanes.forEach((lane, index) => laneMap.set(lane, index));
+
+        setEffects(effects.map(e => ({
+            ...e,
+            lane: laneMap.get(e.lane) ?? e.lane
+        })));
+    };
+
+    // Start moving effect (for lane change)
+    const handleEffectMoveStart = (e: React.MouseEvent, effect: Effect) => {
+        e.stopPropagation();
+        setIsDragging(`${effect.id}-move`);
+        setDragStartY(e.clientY);
+        setDragStartLane(effect.lane);
+        setSelectedEffectId(effect.id);
+    };
 
     // Export handlers
     const handleExport = async () => {
@@ -340,6 +408,12 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     };
 
     const selectedEffect = effects.find(e => e.id === selectedEffectId);
+
+    // Group effects by lane
+    const effectsByLane: Effect[][] = [];
+    for (let i = 0; i < laneCount; i++) {
+        effectsByLane.push(effects.filter(e => e.lane === i));
+    }
 
     return (
         <div className="editor-container">
@@ -433,7 +507,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                     </button>
                 </div>
 
-                {/* Multi-Track Timeline */}
+                {/* Multi-Lane Timeline */}
                 <div className="timeline-wrapper">
                     {/* Time Markers */}
                     <div className="time-markers">
@@ -448,113 +522,111 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                         ))}
                     </div>
 
-                    {/* Timeline Tracks */}
-                    <div
-                        className="timeline-tracks"
-                        ref={timelineRef}
-                        onClick={handleTimelineClick}
-                    >
-                        {/* Video Track */}
-                        <div className="track video-track">
-                            <div className="track-label">Video</div>
-                            <div className="track-content">
-                                {/* Trim region (visible video portion) */}
-                                <div
-                                    className="trim-region"
-                                    style={{
-                                        left: `${(trimStart / duration) * 100}%`,
-                                        width: `${((trimEnd - trimStart) / duration) * 100}%`
-                                    }}
-                                >
-                                    {/* Left trim handle */}
-                                    <div
-                                        className="trim-handle trim-handle-left"
-                                        onMouseDown={handleTrimStartDrag}
-                                    >
-                                        <div className="handle-grip"></div>
-                                    </div>
-                                    {/* Right trim handle */}
-                                    <div
-                                        className="trim-handle trim-handle-right"
-                                        onMouseDown={handleTrimEndDrag}
-                                    >
-                                        <div className="handle-grip"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Effect Tracks - Only show if effects exist */}
-                        {effects.length > 0 && (
-                            <div className="track effects-track">
-                                <div className="track-label">Effects</div>
-                                <div className="track-content">
-                                    {effects.map(effect => {
-                                        const config = EFFECT_CONFIG[effect.type];
-                                        const isSelected = selectedEffectId === effect.id;
-                                        return (
-                                            <div
-                                                key={effect.id}
-                                                className={`effect-segment effect-${effect.type} ${isSelected ? 'selected' : ''}`}
-                                                style={{
-                                                    left: `${(effect.startTime / duration) * 100}%`,
-                                                    width: `${((effect.endTime - effect.startTime) / duration) * 100}%`,
-                                                    backgroundColor: config.color,
-                                                }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setSelectedEffectId(effect.id);
-                                                }}
-                                            >
-                                                {/* Left handle */}
-                                                <div
-                                                    className="effect-handle effect-handle-left"
-                                                    onMouseDown={(e) => {
-                                                        e.stopPropagation();
-                                                        setIsDragging(`${effect.id}-start`);
-                                                    }}
-                                                />
-
-                                                {/* Label */}
-                                                <span className="effect-label">{config.label}</span>
-
-                                                {/* Delete button - visible when selected */}
-                                                {isSelected && (
-                                                    <button
-                                                        className="effect-delete-btn"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            removeEffect(effect.id);
-                                                        }}
-                                                        title="Delete effect"
-                                                    >
-                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                            <line x1="18" y1="6" x2="6" y2="18" />
-                                                            <line x1="6" y1="6" x2="18" y2="18" />
-                                                        </svg>
-                                                    </button>
-                                                )}
-
-                                                {/* Right handle */}
-                                                <div
-                                                    className="effect-handle effect-handle-right"
-                                                    onMouseDown={(e) => {
-                                                        e.stopPropagation();
-                                                        setIsDragging(`${effect.id}-end`);
-                                                    }}
-                                                />
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Playhead */}
+                    {/* Scrollable Timeline Tracks */}
+                    <div className="timeline-scroll-container" ref={tracksContainerRef}>
                         <div
-                            className="playhead"
-                            style={{ left: `${(currentTime / duration) * 100}%` }}
-                        />
+                            className="timeline-tracks"
+                            ref={timelineRef}
+                            onClick={handleTimelineClick}
+                        >
+                            {/* Video Track - Always first */}
+                            <div className="track video-track">
+                                <div className="track-label">Video</div>
+                                <div className="track-content">
+                                    <div
+                                        className="trim-region"
+                                        style={{
+                                            left: `${(trimStart / duration) * 100}%`,
+                                            width: `${((trimEnd - trimStart) / duration) * 100}%`
+                                        }}
+                                    >
+                                        <div
+                                            className="trim-handle trim-handle-left"
+                                            onMouseDown={handleTrimStartDrag}
+                                        >
+                                            <div className="handle-grip"></div>
+                                        </div>
+                                        <div
+                                            className="trim-handle trim-handle-right"
+                                            onMouseDown={handleTrimEndDrag}
+                                        >
+                                            <div className="handle-grip"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Effect Lanes - Dynamic */}
+                            {effectsByLane.map((laneEffects, laneIndex) => (
+                                <div key={laneIndex} className="track effect-lane">
+                                    <div className="track-label">
+                                        {laneIndex === 0 ? 'Effects' : ''}
+                                    </div>
+                                    <div className="track-content">
+                                        {laneEffects.map(effect => {
+                                            const config = EFFECT_CONFIG[effect.type];
+                                            const isSelected = selectedEffectId === effect.id;
+                                            return (
+                                                <div
+                                                    key={effect.id}
+                                                    className={`effect-segment effect-${effect.type} ${isSelected ? 'selected' : ''}`}
+                                                    style={{
+                                                        left: `${(effect.startTime / duration) * 100}%`,
+                                                        width: `${((effect.endTime - effect.startTime) / duration) * 100}%`,
+                                                        backgroundColor: config.color,
+                                                    }}
+                                                    onMouseDown={(e) => handleEffectMoveStart(e, effect)}
+                                                >
+                                                    {/* Left handle */}
+                                                    <div
+                                                        className="effect-handle effect-handle-left"
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                            setIsDragging(`${effect.id}-start`);
+                                                        }}
+                                                    />
+
+                                                    {/* Label */}
+                                                    <span className="effect-label">{config.label}</span>
+
+                                                    {/* Delete button */}
+                                                    {isSelected && (
+                                                        <button
+                                                            className="effect-delete-btn"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                removeEffect(effect.id);
+                                                            }}
+                                                            title="Delete effect"
+                                                        >
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
+
+                                                    {/* Right handle */}
+                                                    <div
+                                                        className="effect-handle effect-handle-right"
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                            setIsDragging(`${effect.id}-end`);
+                                                        }}
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+
+                            {/* Playhead */}
+                            <div
+                                className="playhead"
+                                style={{ left: `${(currentTime / duration) * 100}%` }}
+                            />
+                        </div>
                     </div>
                 </div>
 
