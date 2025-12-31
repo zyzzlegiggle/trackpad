@@ -1,50 +1,56 @@
-/* Video Editor - CapCut-Style Timeline */
+/* Video Editor - Viewport-Fitted Layout */
 
+/* Container fills viewport exactly - no scrolling */
 .editor-container {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    height: 100vh;
     width: 100vw;
-    padding: 24px;
+    padding: 16px;
     background: #f5f5f7;
     box-sizing: border-box;
+    overflow: hidden;
 }
 
+/* Panel uses flex to distribute space */
 .editor-panel {
     background: #ffffff;
-    border-radius: 16px;
+    border-radius: 12px;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-    padding: 20px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     width: 100%;
     max-width: 900px;
+    height: 100%;
+    max-height: calc(100vh - 32px);
     border: 1px solid rgba(0, 0, 0, 0.06);
+    overflow: hidden;
 }
 
-/* Header */
+/* Header - compact */
 .editor-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
 }
 
 .editor-header h2 {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     color: #1a1a1a;
     margin: 0;
 }
 
 .close-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: none;
     background: #f0f0f2;
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -59,17 +65,18 @@
 }
 
 .close-btn svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
 }
 
-/* Video Container */
+/* Video Container - flexible, takes remaining space */
 .video-container {
     position: relative;
     width: 100%;
-    aspect-ratio: 16 / 9;
+    flex: 1;
+    min-height: 0;
     background: #0a0a0a;
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
 }
 
@@ -77,11 +84,14 @@
     width: 100%;
     height: 100%;
     transform-origin: center center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .video-player {
-    width: 100%;
-    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
 }
 
@@ -93,7 +103,7 @@
     transform: translate(-50%, -50%);
     text-align: center;
     color: #888;
-    font-size: 14px;
+    font-size: 13px;
     z-index: 10;
 }
 
@@ -114,8 +124,8 @@
 }
 
 .play-button-overlay {
-    width: 64px;
-    height: 64px;
+    width: 48px;
+    height: 48px;
     background: rgba(255, 255, 255, 0.95);
     border-radius: 50%;
     display: flex;
@@ -130,19 +140,20 @@
 }
 
 .play-button-overlay svg {
-    width: 24px;
-    height: 24px;
+    width: 18px;
+    height: 18px;
     color: #1a1a1a;
-    margin-left: 3px;
+    margin-left: 2px;
 }
 
-/* Time Display */
+/* Time Display + Effects Toolbar Row - Combined for space */
 .time-display {
     display: flex;
     align-items: center;
     gap: 6px;
     font-family: 'SF Mono', 'Consolas', monospace;
-    font-size: 13px;
+    font-size: 12px;
+    flex-shrink: 0;
 }
 
 .current-time {
@@ -158,32 +169,32 @@
     color: #888;
 }
 
-/* Effects Toolbar */
+/* Effects Toolbar - Compact */
 .effects-toolbar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 8px;
+    padding: 8px 10px;
     background: #fafafa;
-    border-radius: 10px;
+    border-radius: 8px;
     border: 1px solid #e5e5e7;
+    flex-shrink: 0;
 }
 
 .toolbar-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: #666;
-    margin-right: 4px;
 }
 
 .effect-btn {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 12px;
+    gap: 4px;
+    padding: 5px 10px;
     border: none;
-    border-radius: 6px;
-    font-size: 12px;
+    border-radius: 5px;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -191,8 +202,8 @@
 }
 
 .effect-btn svg {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
 }
 
 .effect-btn-zoom {
@@ -219,29 +230,30 @@
     background: #d97706;
 }
 
-/* Timeline Wrapper */
+/* Timeline Wrapper - Compact */
 .timeline-wrapper {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     background: #fafafa;
     border-radius: 8px;
-    padding: 12px;
+    padding: 8px 10px;
     border: 1px solid #e5e5e7;
+    flex-shrink: 0;
 }
 
 /* Time Markers */
 .time-markers {
     position: relative;
-    height: 20px;
-    margin-left: 60px;
-    margin-bottom: 4px;
+    height: 16px;
+    margin-left: 50px;
+    margin-bottom: 2px;
 }
 
 .time-marker {
     position: absolute;
     transform: translateX(-50%);
-    font-size: 10px;
+    font-size: 9px;
     color: #888;
     font-family: 'SF Mono', 'Consolas', monospace;
 }
@@ -250,9 +262,9 @@
     content: '';
     position: absolute;
     left: 50%;
-    top: 14px;
+    top: 12px;
     width: 1px;
-    height: 6px;
+    height: 4px;
     background: #ddd;
 }
 
@@ -261,25 +273,25 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     cursor: pointer;
 }
 
 /* Track */
 .track {
     display: flex;
-    height: 40px;
-    border-radius: 6px;
+    height: 32px;
+    border-radius: 5px;
     overflow: visible;
 }
 
 .track-label {
-    width: 60px;
+    width: 50px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding-right: 10px;
-    font-size: 11px;
+    padding-right: 8px;
+    font-size: 10px;
     font-weight: 500;
     color: #666;
     flex-shrink: 0;
@@ -289,7 +301,7 @@
     flex: 1;
     position: relative;
     background: #e8e8ea;
-    border-radius: 6px;
+    border-radius: 5px;
 }
 
 /* Video Track */
@@ -303,19 +315,19 @@
     top: 0;
     bottom: 0;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-    border-radius: 6px;
+    border-radius: 5px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-width: 40px;
+    min-width: 30px;
 }
 
-/* Trim Handles - Left and Right grab bars */
+/* Trim Handles */
 .trim-handle {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 14px;
+    width: 12px;
     background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
     cursor: ew-resize;
     z-index: 5;
@@ -331,58 +343,58 @@
 
 .trim-handle-left {
     left: 0;
-    border-radius: 6px 0 0 6px;
+    border-radius: 5px 0 0 5px;
 }
 
 .trim-handle-right {
     right: 0;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 5px 5px 0;
 }
 
 /* Handle grip dots */
 .handle-grip {
-    width: 4px;
-    height: 16px;
+    width: 3px;
+    height: 12px;
     background: repeating-linear-gradient(to bottom,
             rgba(255, 255, 255, 0.7) 0px,
             rgba(255, 255, 255, 0.7) 2px,
             transparent 2px,
             transparent 4px);
-    border-radius: 2px;
+    border-radius: 1px;
 }
 
 /* Effects Track */
 .effects-track .track-content {
     background: #f0f0f2;
-    min-height: 36px;
+    min-height: 28px;
 }
 
 /* Effect Segment */
 .effect-segment {
     position: absolute;
-    top: 4px;
-    bottom: 4px;
+    top: 3px;
+    bottom: 3px;
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: box-shadow 0.2s ease, transform 0.1s ease;
-    min-width: 40px;
+    transition: box-shadow 0.2s ease;
+    min-width: 30px;
     z-index: 2;
 }
 
 .effect-segment:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .effect-segment.selected {
-    box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor;
     z-index: 3;
 }
 
 .effect-label {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 600;
     color: white;
     pointer-events: none;
@@ -394,7 +406,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 8px;
+    width: 6px;
     cursor: ew-resize;
     z-index: 3;
     transition: background 0.2s ease;
@@ -417,10 +429,10 @@
 /* Effect Delete Button */
 .effect-delete-btn {
     position: absolute;
-    top: -8px;
-    right: -8px;
-    width: 18px;
-    height: 18px;
+    top: -6px;
+    right: -6px;
+    width: 14px;
+    height: 14px;
     padding: 0;
     border: none;
     background: #ef4444;
@@ -430,7 +442,7 @@
     align-items: center;
     justify-content: center;
     z-index: 10;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     transition: transform 0.2s ease, background 0.2s ease;
 }
 
@@ -440,8 +452,8 @@
 }
 
 .effect-delete-btn svg {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     color: white;
 }
 
@@ -450,7 +462,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 60px;
+    left: 50px;
     width: 2px;
     background: #ef4444;
     z-index: 10;
@@ -461,43 +473,44 @@
 .playhead::before {
     content: '';
     position: absolute;
-    top: -4px;
+    top: -3px;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-top: 6px solid #ef4444;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #ef4444;
 }
 
-/* Effect Settings Panel */
+/* Effect Settings Panel - Compact */
 .effect-settings {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 10px 14px;
+    gap: 12px;
+    padding: 8px 12px;
     background: #fafafa;
-    border-radius: 8px;
+    border-radius: 6px;
     border: 2px solid;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .effect-settings-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
 }
 
 .effect-settings label {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
+    gap: 6px;
+    font-size: 11px;
     color: #444;
 }
 
 .effect-settings input[type="range"] {
-    width: 100px;
+    width: 80px;
     height: 4px;
     -webkit-appearance: none;
     background: #ddd;
@@ -507,20 +520,20 @@
 
 .effect-settings input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     background: #666;
     border-radius: 50%;
     cursor: pointer;
 }
 
 .effect-delete-text-btn {
-    padding: 6px 12px;
+    padding: 4px 10px;
     background: transparent;
     color: #dc2626;
     border: 1px solid #fecaca;
-    border-radius: 6px;
-    font-size: 12px;
+    border-radius: 4px;
+    font-size: 11px;
     cursor: pointer;
     transition: all 0.2s ease;
     margin-left: auto;
@@ -531,12 +544,13 @@
     border-color: #dc2626;
 }
 
-/* Trim Info */
+/* Trim Info - Compact */
 .trim-info {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 11px;
     color: #888;
+    flex-shrink: 0;
 }
 
 .trim-duration {
@@ -544,18 +558,19 @@
     color: #6366f1;
 }
 
-/* Controls */
+/* Controls - Compact */
 .editor-controls {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: 12px;
+    padding-top: 8px;
     border-top: 1px solid #f0f0f2;
+    flex-shrink: 0;
 }
 
 .control-btn {
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     border: none;
     background: #f0f0f2;
     border-radius: 50%;
@@ -572,24 +587,24 @@
 }
 
 .control-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
 }
 
 .play-btn svg {
-    margin-left: 2px;
+    margin-left: 1px;
 }
 
 .export-controls {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 .secondary-btn,
 .primary-btn {
-    padding: 10px 20px;
-    border-radius: 10px;
-    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
