@@ -67,22 +67,69 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     // Calculate the number of lanes needed
     const laneCount = effects.length > 0 ? Math.max(...effects.map(e => e.lane)) + 1 : 0;
 
+    // Calculate timeline duration - extends beyond video if effects go further
+    const maxEffectEnd = effects.length > 0 ? Math.max(...effects.map(e => e.endTime)) : 0;
+    const timelineDuration = Math.max(duration, maxEffectEnd);
+
     // Get active effects at current playhead
     const activeEffects = effects.filter(
         e => currentTime >= e.startTime && currentTime <= e.endTime
     );
 
-    // Find the first available lane for a new effect at given time range
-    const findAvailableLane = (startTime: number, endTime: number, excludeId?: string): number => {
-        for (let lane = 0; lane <= laneCount; lane++) {
-            const overlapping = effects.some(e =>
-                e.id !== excludeId &&
-                e.lane === lane &&
-                rangesOverlap(startTime, endTime, e.startTime, e.endTime)
-            );
-            if (!overlapping) return lane;
+    // Find an available time slot in a given lane for an effect of given duration
+    // Returns the start time where the effect can be placed without overlapping
+    const findAvailableSlotInLane = (lane: number, desiredStart: number, effectDuration: number, excludeId?: string): number => {
+        const laneEffects = effects
+            .filter(e => e.id !== excludeId && e.lane === lane)
+            .sort((a, b) => a.startTime - b.startTime);
+
+        // If no effects in lane, place at desired position
+        if (laneEffects.length === 0) return desiredStart;
+
+        // Check if we can fit at desired position
+        const desiredEnd = desiredStart + effectDuration;
+        const hasOverlap = laneEffects.some(e =>
+            rangesOverlap(desiredStart, desiredEnd, e.startTime, e.endTime)
+        );
+
+        if (!hasOverlap) return desiredStart;
+
+        // Find the end of the last effect in this lane and place after it
+        const lastEffect = laneEffects[laneEffects.length - 1];
+        return lastEffect.endTime;
+    };
+
+    // Snap effect to avoid overlaps - returns adjusted start/end times
+    const snapToAvoidOverlap = (effectId: string, newStart: number, newEnd: number, lane: number): { start: number; end: number } => {
+        const effectDuration = newEnd - newStart;
+        const laneEffects = effects
+            .filter(e => e.id !== effectId && e.lane === lane)
+            .sort((a, b) => a.startTime - b.startTime);
+
+        if (laneEffects.length === 0) return { start: newStart, end: newEnd };
+
+        // Check for overlap
+        const overlappingEffect = laneEffects.find(e =>
+            rangesOverlap(newStart, newEnd, e.startTime, e.endTime)
+        );
+
+        if (!overlappingEffect) return { start: newStart, end: newEnd };
+
+        // Determine if we should snap before or after the overlapping effect
+        const midpoint = (overlappingEffect.startTime + overlappingEffect.endTime) / 2;
+        const effectMidpoint = (newStart + newEnd) / 2;
+
+        if (effectMidpoint < midpoint) {
+            // Snap before the overlapping effect
+            const adjustedEnd = overlappingEffect.startTime;
+            const adjustedStart = Math.max(0, adjustedEnd - effectDuration);
+            return { start: adjustedStart, end: adjustedEnd };
+        } else {
+            // Snap after the overlapping effect
+            const adjustedStart = overlappingEffect.endTime;
+            const adjustedEnd = adjustedStart + effectDuration;
+            return { start: adjustedStart, end: adjustedEnd };
         }
-        return laneCount; // New lane at the end
     };
 
     // Video event handlers
@@ -167,10 +214,10 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
 
     // Generate time markers
     const generateTimeMarkers = () => {
-        if (duration === 0) return [];
-        const interval = duration < 30 ? 5 : duration < 60 ? 10 : 30;
+        if (timelineDuration === 0) return [];
+        const interval = timelineDuration < 30 ? 5 : timelineDuration < 60 ? 10 : 30;
         const markers = [];
-        for (let t = 0; t <= duration; t += interval) {
+        for (let t = 0; t <= timelineDuration; t += interval) {
             markers.push(t);
         }
         return markers;
@@ -190,16 +237,18 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     // Effect functions
     const addEffect = (type: EffectType) => {
         const config = EFFECT_CONFIG[type];
-        const startTime = currentTime;
-        const endTime = Math.min(currentTime + config.defaultDuration, duration);
-        const lane = findAvailableLane(startTime, endTime);
+        const effectDuration = config.defaultDuration;
+
+        // Always try to place in lane 0, find available slot beside existing effects
+        const startTime = findAvailableSlotInLane(0, currentTime, effectDuration);
+        const endTime = startTime + effectDuration;
 
         const newEffect: Effect = {
             id: `${type}-${Date.now()}`,
             type,
             startTime,
             endTime,
-            lane,
+            lane: 0, // Always add to first effect lane
         };
 
         // Add type-specific defaults
@@ -286,9 +335,21 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         };
 
         const handleMouseUp = () => {
-            // Compact lanes after drag ends (remove empty lanes)
+            // On lane change, snap to avoid overlaps
             if (isDragging?.endsWith('-move')) {
-                compactLanes();
+                const effectId = isDragging.replace('-move', '');
+                const effect = effects.find(e => e.id === effectId);
+                if (effect) {
+                    const snapped = snapToAvoidOverlap(
+                        effect.id,
+                        effect.startTime,
+                        effect.endTime,
+                        effect.lane
+                    );
+                    updateEffect(effect.id, { startTime: snapped.start, endTime: snapped.end });
+                }
+                // Compact lanes after adjustments
+                setTimeout(compactLanes, 0);
             }
             setIsDragging(null);
         };
@@ -515,7 +576,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                             <div
                                 key={time}
                                 className="time-marker"
-                                style={{ left: `${(time / duration) * 100}%` }}
+                                style={{ left: `${(time / timelineDuration) * 100}%` }}
                             >
                                 <span>{formatTime(time)}</span>
                             </div>
@@ -536,8 +597,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                                     <div
                                         className="trim-region"
                                         style={{
-                                            left: `${(trimStart / duration) * 100}%`,
-                                            width: `${((trimEnd - trimStart) / duration) * 100}%`
+                                            left: `${(trimStart / timelineDuration) * 100}%`,
+                                            width: `${((trimEnd - trimStart) / timelineDuration) * 100}%`
                                         }}
                                     >
                                         <div
@@ -571,8 +632,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                                                     key={effect.id}
                                                     className={`effect-segment effect-${effect.type} ${isSelected ? 'selected' : ''}`}
                                                     style={{
-                                                        left: `${(effect.startTime / duration) * 100}%`,
-                                                        width: `${((effect.endTime - effect.startTime) / duration) * 100}%`,
+                                                        left: `${(effect.startTime / timelineDuration) * 100}%`,
+                                                        width: `${((effect.endTime - effect.startTime) / timelineDuration) * 100}%`,
                                                         backgroundColor: config.color,
                                                     }}
                                                     onMouseDown={(e) => handleEffectMoveStart(e, effect)}
@@ -624,7 +685,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                             {/* Playhead */}
                             <div
                                 className="playhead"
-                                style={{ left: `${(currentTime / duration) * 100}%` }}
+                                style={{ left: `${(currentTime / timelineDuration) * 100}%` }}
                             />
                         </div>
                     </div>
