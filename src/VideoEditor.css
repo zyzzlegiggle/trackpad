@@ -1,4 +1,4 @@
-/* Video Editor - Enhanced Timeline */
+/* Video Editor - CapCut-Style Timeline */
 
 .editor-container {
     display: flex;
@@ -158,6 +158,67 @@
     color: #888;
 }
 
+/* Effects Toolbar */
+.effects-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #fafafa;
+    border-radius: 10px;
+    border: 1px solid #e5e5e7;
+}
+
+.toolbar-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #666;
+    margin-right: 4px;
+}
+
+.effect-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: white;
+}
+
+.effect-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.effect-btn-zoom {
+    background: #10b981;
+}
+
+.effect-btn-zoom:hover {
+    background: #059669;
+}
+
+.effect-btn-blur {
+    background: #3b82f6;
+}
+
+.effect-btn-blur:hover {
+    background: #2563eb;
+}
+
+.effect-btn-slowmo {
+    background: #f59e0b;
+}
+
+.effect-btn-slowmo:hover {
+    background: #d97706;
+}
+
 /* Timeline Wrapper */
 .timeline-wrapper {
     display: flex;
@@ -173,7 +234,7 @@
 .time-markers {
     position: relative;
     height: 20px;
-    margin-left: 50px;
+    margin-left: 60px;
     margin-bottom: 4px;
 }
 
@@ -200,20 +261,20 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     cursor: pointer;
 }
 
 /* Track */
 .track {
     display: flex;
-    height: 36px;
+    height: 40px;
     border-radius: 6px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .track-label {
-    width: 50px;
+    width: 60px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -228,102 +289,160 @@
     flex: 1;
     position: relative;
     background: #e8e8ea;
-    border-radius: 4px;
+    border-radius: 6px;
 }
 
 /* Video Track */
 .video-track .track-content {
-    background: linear-gradient(90deg, #e0e0e4 0%, #d8d8dc 50%, #e0e0e4 100%);
+    background: linear-gradient(90deg, #d0d0d4 0%, #c8c8cc 50%, #d0d0d4 100%);
 }
 
+/* Trim Region - The visible video bar */
 .trim-region {
     position: absolute;
     top: 0;
     bottom: 0;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-    opacity: 0.3;
-    border-radius: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 40px;
 }
 
+/* Trim Handles - Left and Right grab bars */
 .trim-handle {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 8px;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    width: 14px;
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
     cursor: ew-resize;
     z-index: 5;
-    border-radius: 2px;
-    transition: transform 0.1s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
 }
 
 .trim-handle:hover {
-    transform: scaleX(1.3);
+    background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
 }
 
-.trim-handle-start {
-    transform: translateX(-50%);
+.trim-handle-left {
+    left: 0;
+    border-radius: 6px 0 0 6px;
 }
 
-.trim-handle-end {
-    transform: translateX(-50%);
+.trim-handle-right {
+    right: 0;
+    border-radius: 0 6px 6px 0;
 }
 
-/* Zoom Track */
-.zoom-track .track-content {
+/* Handle grip dots */
+.handle-grip {
+    width: 4px;
+    height: 16px;
+    background: repeating-linear-gradient(to bottom,
+            rgba(255, 255, 255, 0.7) 0px,
+            rgba(255, 255, 255, 0.7) 2px,
+            transparent 2px,
+            transparent 4px);
+    border-radius: 2px;
+}
+
+/* Effects Track */
+.effects-track .track-content {
     background: #f0f0f2;
+    min-height: 36px;
 }
 
-.zoom-segment {
+/* Effect Segment */
+.effect-segment {
     position: absolute;
     top: 4px;
     bottom: 4px;
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: box-shadow 0.2s ease;
-    min-width: 24px;
+    transition: box-shadow 0.2s ease, transform 0.1s ease;
+    min-width: 40px;
+    z-index: 2;
 }
 
-.zoom-segment:hover {
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+.effect-segment:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.zoom-segment.selected {
-    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #10b981;
+.effect-segment.selected {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+    z-index: 3;
 }
 
-.zoom-label {
+.effect-label {
     font-size: 10px;
     font-weight: 600;
     color: white;
     pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.zoom-handle {
+/* Effect Handles */
+.effect-handle {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 6px;
+    width: 8px;
     cursor: ew-resize;
     z-index: 3;
+    transition: background 0.2s ease;
 }
 
-.zoom-handle-start {
+.effect-handle:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.effect-handle-left {
     left: 0;
     border-radius: 4px 0 0 4px;
 }
 
-.zoom-handle-end {
+.effect-handle-right {
     right: 0;
     border-radius: 0 4px 4px 0;
 }
 
-.zoom-handle:hover {
-    background: rgba(255, 255, 255, 0.3);
+/* Effect Delete Button */
+.effect-delete-btn {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    background: #ef4444;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.effect-delete-btn:hover {
+    background: #dc2626;
+    transform: scale(1.1);
+}
+
+.effect-delete-btn svg {
+    width: 10px;
+    height: 10px;
+    color: white;
 }
 
 /* Playhead */
@@ -331,7 +450,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 50px;
+    left: 60px;
     width: 2px;
     background: #ef4444;
     z-index: 10;
@@ -352,75 +471,50 @@
     border-top: 6px solid #ef4444;
 }
 
-/* Zoom Controls */
-.zoom-controls {
+/* Effect Settings Panel */
+.effect-settings {
     display: flex;
     align-items: center;
     gap: 16px;
+    padding: 10px 14px;
+    background: #fafafa;
+    border-radius: 8px;
+    border: 2px solid;
     flex-wrap: wrap;
 }
 
-.add-zoom-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: #10b981;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
+.effect-settings-label {
+    font-size: 12px;
+    font-weight: 600;
 }
 
-.add-zoom-btn:hover {
-    background: #059669;
-}
-
-.add-zoom-btn svg {
-    width: 16px;
-    height: 16px;
-}
-
-.zoom-settings {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 8px 12px;
-    background: #f0fdf4;
-    border-radius: 8px;
-    border: 1px solid #bbf7d0;
-}
-
-.zoom-settings label {
+.effect-settings label {
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: #166534;
+    color: #444;
 }
 
-.zoom-settings input[type="range"] {
+.effect-settings input[type="range"] {
     width: 100px;
     height: 4px;
     -webkit-appearance: none;
-    background: #bbf7d0;
+    background: #ddd;
     border-radius: 2px;
     cursor: pointer;
 }
 
-.zoom-settings input[type="range"]::-webkit-slider-thumb {
+.effect-settings input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 14px;
     height: 14px;
-    background: #10b981;
+    background: #666;
     border-radius: 50%;
     cursor: pointer;
 }
 
-.delete-zoom-btn {
+.effect-delete-text-btn {
     padding: 6px 12px;
     background: transparent;
     color: #dc2626;
@@ -429,9 +523,10 @@
     font-size: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
+    margin-left: auto;
 }
 
-.delete-zoom-btn:hover {
+.effect-delete-text-btn:hover {
     background: #fef2f2;
     border-color: #dc2626;
 }

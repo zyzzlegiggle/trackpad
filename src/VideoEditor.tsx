@@ -7,14 +7,27 @@ interface VideoEditorProps {
     onClose: () => void;
 }
 
-interface ZoomEffect {
+// Unified effect interface for all effect types
+type EffectType = 'zoom' | 'blur' | 'slowmo';
+
+interface Effect {
     id: string;
+    type: EffectType;
     startTime: number;
     endTime: number;
-    scale: number;
-    targetX: number;
-    targetY: number;
+    // Type-specific properties
+    scale?: number;      // For zoom
+    targetX?: number;    // For zoom
+    targetY?: number;    // For zoom
+    intensity?: number;  // For blur
+    speed?: number;      // For slowmo
 }
+
+const EFFECT_CONFIG: Record<EffectType, { label: string; color: string; defaultDuration: number }> = {
+    zoom: { label: 'Zoom', color: '#10b981', defaultDuration: 2 },
+    blur: { label: 'Blur', color: '#3b82f6', defaultDuration: 2 },
+    slowmo: { label: 'Slow-Mo', color: '#f59e0b', defaultDuration: 3 },
+};
 
 function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -27,13 +40,13 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     const [videoLoaded, setVideoLoaded] = useState(false);
     const [videoError, setVideoError] = useState("");
 
-    // Trim state
+    // Trim state (video duration adjustment)
     const [trimStart, setTrimStart] = useState(0);
     const [trimEnd, setTrimEnd] = useState(0);
 
-    // Zoom effects state
-    const [zoomEffects, setZoomEffects] = useState<ZoomEffect[]>([]);
-    const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
+    // Effects state
+    const [effects, setEffects] = useState<Effect[]>([]);
+    const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState<string | null>(null);
 
     // Export state
@@ -42,9 +55,9 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
 
     const videoUrl = convertFileSrc(videoPath);
 
-    // Get current zoom effect at playhead
-    const activeZoom = zoomEffects.find(
-        z => currentTime >= z.startTime && currentTime <= z.endTime
+    // Get active effects at current playhead
+    const activeEffects = effects.filter(
+        e => currentTime >= e.startTime && currentTime <= e.endTime
     );
 
     // Video event handlers
@@ -102,6 +115,8 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     // Timeline click to seek
     const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         if (!timelineRef.current || !videoRef.current || duration === 0) return;
+        // Only seek if clicking on the timeline background, not on handles
+        if ((e.target as HTMLElement).closest('.effect-segment, .trim-handle')) return;
 
         const rect = timelineRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -148,30 +163,41 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         setIsDragging('trim-end');
     };
 
-    // Zoom effect functions
-    const addZoomEffect = () => {
-        const newZoom: ZoomEffect = {
-            id: `zoom-${Date.now()}`,
+    // Effect functions
+    const addEffect = (type: EffectType) => {
+        const config = EFFECT_CONFIG[type];
+        const newEffect: Effect = {
+            id: `${type}-${Date.now()}`,
+            type,
             startTime: currentTime,
-            endTime: Math.min(currentTime + 2, duration),
-            scale: 1.5,
-            targetX: 0.5,
-            targetY: 0.5,
+            endTime: Math.min(currentTime + config.defaultDuration, duration),
         };
-        setZoomEffects([...zoomEffects, newZoom]);
-        setSelectedZoomId(newZoom.id);
+
+        // Add type-specific defaults
+        if (type === 'zoom') {
+            newEffect.scale = 1.5;
+            newEffect.targetX = 0.5;
+            newEffect.targetY = 0.5;
+        } else if (type === 'blur') {
+            newEffect.intensity = 5;
+        } else if (type === 'slowmo') {
+            newEffect.speed = 0.5;
+        }
+
+        setEffects([...effects, newEffect]);
+        setSelectedEffectId(newEffect.id);
     };
 
-    const removeZoomEffect = (id: string) => {
-        setZoomEffects(zoomEffects.filter(z => z.id !== id));
-        if (selectedZoomId === id) {
-            setSelectedZoomId(null);
+    const removeEffect = (id: string) => {
+        setEffects(effects.filter(e => e.id !== id));
+        if (selectedEffectId === id) {
+            setSelectedEffectId(null);
         }
     };
 
-    const updateZoomEffect = (id: string, updates: Partial<ZoomEffect>) => {
-        setZoomEffects(zoomEffects.map(z =>
-            z.id === id ? { ...z, ...updates } : z
+    const updateEffect = (id: string, updates: Partial<Effect>) => {
+        setEffects(effects.map(e =>
+            e.id === id ? { ...e, ...updates } : e
         ));
     };
 
@@ -195,17 +221,21 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                 if (newTime > trimStart + 0.5) {
                     setTrimEnd(newTime);
                 }
-            } else if (isDragging.startsWith('zoom-')) {
-                const [, zoomId, edge] = isDragging.split('-');
-                const zoom = zoomEffects.find(z => z.id === `zoom-${zoomId}`);
-                if (zoom) {
+            } else if (isDragging.includes('-start') || isDragging.includes('-end')) {
+                // Effect dragging: format is "effectId-start" or "effectId-end"
+                const parts = isDragging.split('-');
+                const edge = parts.pop(); // 'start' or 'end'
+                const effectId = parts.join('-'); // rejoin in case id has dashes
+
+                const effect = effects.find(e => e.id === effectId);
+                if (effect) {
                     if (edge === 'start') {
-                        if (newTime < zoom.endTime - 0.5) {
-                            updateZoomEffect(`zoom-${zoomId}`, { startTime: newTime });
+                        if (newTime < effect.endTime - 0.5) {
+                            updateEffect(effectId, { startTime: newTime });
                         }
                     } else if (edge === 'end') {
-                        if (newTime > zoom.startTime + 0.5) {
-                            updateZoomEffect(`zoom-${zoomId}`, { endTime: newTime });
+                        if (newTime > effect.startTime + 0.5) {
+                            updateEffect(effectId, { endTime: newTime });
                         }
                     }
                 }
@@ -223,7 +253,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, duration, trimStart, trimEnd, zoomEffects]);
+    }, [isDragging, duration, trimStart, trimEnd, effects]);
 
     // Export handlers
     const handleExport = async () => {
@@ -287,18 +317,29 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
     };
 
     // Calculate zoom transform for preview
-    const getZoomTransform = () => {
-        if (!activeZoom) return {};
-        const scale = activeZoom.scale;
-        const translateX = (0.5 - activeZoom.targetX) * (scale - 1) * 100;
-        const translateY = (0.5 - activeZoom.targetY) * (scale - 1) * 100;
+    const getVideoTransform = () => {
+        const zoomEffect = activeEffects.find(e => e.type === 'zoom');
+        if (!zoomEffect || !zoomEffect.scale) return {};
+
+        const scale = zoomEffect.scale;
+        const translateX = (0.5 - (zoomEffect.targetX || 0.5)) * (scale - 1) * 100;
+        const translateY = (0.5 - (zoomEffect.targetY || 0.5)) * (scale - 1) * 100;
         return {
             transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
             transition: 'transform 0.3s ease-out'
         };
     };
 
-    const selectedZoom = zoomEffects.find(z => z.id === selectedZoomId);
+    // Get video filter for blur effect
+    const getVideoFilter = () => {
+        const blurEffect = activeEffects.find(e => e.type === 'blur');
+        if (!blurEffect || !blurEffect.intensity) return {};
+        return {
+            filter: `blur(${blurEffect.intensity}px)`
+        };
+    };
+
+    const selectedEffect = effects.find(e => e.id === selectedEffectId);
 
     return (
         <div className="editor-container">
@@ -324,7 +365,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                     {!videoLoaded && !videoError && (
                         <div className="video-loading">Loading video...</div>
                     )}
-                    <div className="video-wrapper" style={getZoomTransform()}>
+                    <div className="video-wrapper" style={{ ...getVideoTransform(), ...getVideoFilter() }}>
                         <video
                             ref={videoRef}
                             src={videoUrl}
@@ -349,6 +390,47 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                     <span className="current-time">{formatTimeDetailed(currentTime)}</span>
                     <span className="time-separator">/</span>
                     <span className="total-time">{formatTimeDetailed(duration)}</span>
+                </div>
+
+                {/* Effect Buttons Toolbar */}
+                <div className="effects-toolbar">
+                    <span className="toolbar-label">Add Effect:</span>
+                    <button
+                        className="effect-btn effect-btn-zoom"
+                        onClick={() => addEffect('zoom')}
+                        title="Add Zoom Effect"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            <line x1="11" y1="8" x2="11" y2="14" />
+                            <line x1="8" y1="11" x2="14" y2="11" />
+                        </svg>
+                        Zoom
+                    </button>
+                    <button
+                        className="effect-btn effect-btn-blur"
+                        onClick={() => addEffect('blur')}
+                        title="Add Blur Effect"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <circle cx="12" cy="12" r="6" />
+                            <circle cx="12" cy="12" r="2" />
+                        </svg>
+                        Blur
+                    </button>
+                    <button
+                        className="effect-btn effect-btn-slowmo"
+                        onClick={() => addEffect('slowmo')}
+                        title="Add Slow-Mo Effect"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12,6 12,12 16,14" />
+                        </svg>
+                        Slow-Mo
+                    </button>
                 </div>
 
                 {/* Multi-Track Timeline */}
@@ -376,64 +458,97 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                         <div className="track video-track">
                             <div className="track-label">Video</div>
                             <div className="track-content">
-                                {/* Trim region */}
+                                {/* Trim region (visible video portion) */}
                                 <div
                                     className="trim-region"
                                     style={{
                                         left: `${(trimStart / duration) * 100}%`,
                                         width: `${((trimEnd - trimStart) / duration) * 100}%`
                                     }}
-                                />
-                                {/* Trim handles */}
-                                <div
-                                    className="trim-handle trim-handle-start"
-                                    style={{ left: `${(trimStart / duration) * 100}%` }}
-                                    onMouseDown={handleTrimStartDrag}
-                                />
-                                <div
-                                    className="trim-handle trim-handle-end"
-                                    style={{ left: `${(trimEnd / duration) * 100}%` }}
-                                    onMouseDown={handleTrimEndDrag}
-                                />
+                                >
+                                    {/* Left trim handle */}
+                                    <div
+                                        className="trim-handle trim-handle-left"
+                                        onMouseDown={handleTrimStartDrag}
+                                    >
+                                        <div className="handle-grip"></div>
+                                    </div>
+                                    {/* Right trim handle */}
+                                    <div
+                                        className="trim-handle trim-handle-right"
+                                        onMouseDown={handleTrimEndDrag}
+                                    >
+                                        <div className="handle-grip"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Zoom Track */}
-                        <div className="track zoom-track">
-                            <div className="track-label">Zoom</div>
-                            <div className="track-content">
-                                {zoomEffects.map(zoom => (
-                                    <div
-                                        key={zoom.id}
-                                        className={`zoom-segment ${selectedZoomId === zoom.id ? 'selected' : ''}`}
-                                        style={{
-                                            left: `${(zoom.startTime / duration) * 100}%`,
-                                            width: `${((zoom.endTime - zoom.startTime) / duration) * 100}%`
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setSelectedZoomId(zoom.id);
-                                        }}
-                                    >
-                                        <div
-                                            className="zoom-handle zoom-handle-start"
-                                            onMouseDown={(e) => {
-                                                e.stopPropagation();
-                                                setIsDragging(`zoom-${zoom.id.split('-')[1]}-start`);
-                                            }}
-                                        />
-                                        <span className="zoom-label">{zoom.scale}x</span>
-                                        <div
-                                            className="zoom-handle zoom-handle-end"
-                                            onMouseDown={(e) => {
-                                                e.stopPropagation();
-                                                setIsDragging(`zoom-${zoom.id.split('-')[1]}-end`);
-                                            }}
-                                        />
-                                    </div>
-                                ))}
+                        {/* Effect Tracks - Only show if effects exist */}
+                        {effects.length > 0 && (
+                            <div className="track effects-track">
+                                <div className="track-label">Effects</div>
+                                <div className="track-content">
+                                    {effects.map(effect => {
+                                        const config = EFFECT_CONFIG[effect.type];
+                                        const isSelected = selectedEffectId === effect.id;
+                                        return (
+                                            <div
+                                                key={effect.id}
+                                                className={`effect-segment effect-${effect.type} ${isSelected ? 'selected' : ''}`}
+                                                style={{
+                                                    left: `${(effect.startTime / duration) * 100}%`,
+                                                    width: `${((effect.endTime - effect.startTime) / duration) * 100}%`,
+                                                    backgroundColor: config.color,
+                                                }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedEffectId(effect.id);
+                                                }}
+                                            >
+                                                {/* Left handle */}
+                                                <div
+                                                    className="effect-handle effect-handle-left"
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsDragging(`${effect.id}-start`);
+                                                    }}
+                                                />
+
+                                                {/* Label */}
+                                                <span className="effect-label">{config.label}</span>
+
+                                                {/* Delete button - visible when selected */}
+                                                {isSelected && (
+                                                    <button
+                                                        className="effect-delete-btn"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            removeEffect(effect.id);
+                                                        }}
+                                                        title="Delete effect"
+                                                    >
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <line x1="18" y1="6" x2="6" y2="18" />
+                                                            <line x1="6" y1="6" x2="18" y2="18" />
+                                                        </svg>
+                                                    </button>
+                                                )}
+
+                                                {/* Right handle */}
+                                                <div
+                                                    className="effect-handle effect-handle-right"
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsDragging(`${effect.id}-end`);
+                                                    }}
+                                                />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* Playhead */}
                         <div
@@ -443,42 +558,69 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                     </div>
                 </div>
 
-                {/* Zoom Controls */}
-                <div className="zoom-controls">
-                    <button className="add-zoom-btn" onClick={addZoomEffect}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="11" cy="11" r="8" />
-                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                            <line x1="11" y1="8" x2="11" y2="14" />
-                            <line x1="8" y1="11" x2="14" y2="11" />
-                        </svg>
-                        Add Zoom
-                    </button>
+                {/* Selected Effect Settings */}
+                {selectedEffect && (
+                    <div className="effect-settings" style={{ borderColor: EFFECT_CONFIG[selectedEffect.type].color }}>
+                        <span className="effect-settings-label" style={{ color: EFFECT_CONFIG[selectedEffect.type].color }}>
+                            {EFFECT_CONFIG[selectedEffect.type].label} Settings
+                        </span>
 
-                    {selectedZoom && (
-                        <div className="zoom-settings">
+                        {selectedEffect.type === 'zoom' && (
                             <label>
-                                Scale: {selectedZoom.scale.toFixed(1)}x
+                                Scale: {(selectedEffect.scale || 1.5).toFixed(1)}x
                                 <input
                                     type="range"
                                     min="1"
                                     max="3"
                                     step="0.1"
-                                    value={selectedZoom.scale}
-                                    onChange={(e) => updateZoomEffect(selectedZoom.id, {
+                                    value={selectedEffect.scale || 1.5}
+                                    onChange={(e) => updateEffect(selectedEffect.id, {
                                         scale: parseFloat(e.target.value)
                                     })}
                                 />
                             </label>
-                            <button
-                                className="delete-zoom-btn"
-                                onClick={() => removeZoomEffect(selectedZoom.id)}
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    )}
-                </div>
+                        )}
+
+                        {selectedEffect.type === 'blur' && (
+                            <label>
+                                Intensity: {selectedEffect.intensity || 5}px
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="20"
+                                    step="1"
+                                    value={selectedEffect.intensity || 5}
+                                    onChange={(e) => updateEffect(selectedEffect.id, {
+                                        intensity: parseInt(e.target.value)
+                                    })}
+                                />
+                            </label>
+                        )}
+
+                        {selectedEffect.type === 'slowmo' && (
+                            <label>
+                                Speed: {((selectedEffect.speed || 0.5) * 100).toFixed(0)}%
+                                <input
+                                    type="range"
+                                    min="0.1"
+                                    max="1"
+                                    step="0.1"
+                                    value={selectedEffect.speed || 0.5}
+                                    onChange={(e) => updateEffect(selectedEffect.id, {
+                                        speed: parseFloat(e.target.value)
+                                    })}
+                                />
+                            </label>
+                        )}
+
+                        <button
+                            className="effect-delete-text-btn"
+                            onClick={() => removeEffect(selectedEffect.id)}
+                        >
+                            Delete Effect
+                        </button>
+                    </div>
+                )}
 
                 {/* Trim Info */}
                 <div className="trim-info">
