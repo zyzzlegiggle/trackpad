@@ -2,13 +2,56 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./VideoEditor.css";
 
+// Click event from recording
+interface ClickEvent {
+    timestamp_ms: number;
+    x: number;
+    y: number;
+    is_double_click: boolean;
+}
+
 interface VideoEditorProps {
     videoPath: string;
     onClose: () => void;
+    clickEvents?: ClickEvent[];
 }
 
 // Unified effect interface with lane support
 type EffectType = 'zoom' | 'blur' | 'slowmo';
+
+// Easing curve point for controlling zoom in/out intensity over time
+interface EasingPoint {
+    t: number;     // Normalized time (0-1) within the effect
+    value: number; // Intensity (0-1), where 0=no effect, 1=full effect
+}
+
+// Default S-curve: fade in, hold, fade out
+const DEFAULT_EASING_CURVE: EasingPoint[] = [
+    { t: 0, value: 0 },      // Start: no zoom
+    { t: 0.2, value: 1 },    // 20%: fully zoomed in
+    { t: 0.8, value: 1 },    // 80%: still zoomed
+    { t: 1, value: 0 },      // End: zoom out
+];
+
+// Interpolate easing curve to get intensity at a given progress (0-1)
+const sampleEasingCurve = (curve: EasingPoint[], progress: number): number => {
+    if (progress <= 0) return curve[0]?.value ?? 0;
+    if (progress >= 1) return curve[curve.length - 1]?.value ?? 0;
+
+    // Find surrounding points
+    for (let i = 0; i < curve.length - 1; i++) {
+        const p1 = curve[i];
+        const p2 = curve[i + 1];
+        if (progress >= p1.t && progress <= p2.t) {
+            // Linear interpolation between points
+            const localProgress = (progress - p1.t) / (p2.t - p1.t);
+            // Use smooth step for nicer interpolation
+            const smooth = localProgress * localProgress * (3 - 2 * localProgress);
+            return p1.value + (p2.value - p1.value) * smooth;
+        }
+    }
+    return curve[curve.length - 1]?.value ?? 0;
+};
 
 interface Effect {
     id: string;
@@ -22,6 +65,8 @@ interface Effect {
     targetY?: number;
     intensity?: number;
     speed?: number;
+    // Easing curve for zoom effects
+    easingCurve?: EasingPoint[];
 }
 
 const EFFECT_CONFIG: Record<EffectType, { label: string; color: string; defaultDuration: number }> = {
@@ -35,7 +80,7 @@ const rangesOverlap = (s1: number, e1: number, s2: number, e2: number): boolean 
     return s1 < e2 && e1 > s2;
 };
 
-function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
+function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const timelineRef = useRef<HTMLDivElement>(null);
     const tracksContainerRef = useRef<HTMLDivElement>(null);
@@ -168,6 +213,62 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         };
     }, [trimEnd]);
 
+    // Auto-generate zoom effects from recorded double-clicks
+    useEffect(() => {
+        if (!videoLoaded || clickEvents.length === 0) return;
+
+        // Only auto-generate if no effects exist yet (first load)
+        if (effects.length > 0) return;
+
+        const zoomDuration = EFFECT_CONFIG.zoom.defaultDuration;
+        const generatedEffects: Effect[] = [];
+
+        clickEvents
+            .filter(click => click.is_double_click)
+            .forEach((click, index) => {
+                const startTime = click.timestamp_ms / 1000; // Convert ms to seconds
+                const endTime = startTime + zoomDuration;
+
+                // Find available lane (use findAvailableSlotInLane logic)
+                let lane = 0;
+                let adjustedStart = startTime;
+
+                // Check for overlaps with already generated effects
+                const hasOverlap = generatedEffects.some(e =>
+                    rangesOverlap(startTime, endTime, e.startTime, e.endTime)
+                );
+
+                if (hasOverlap) {
+                    // Place after the last effect that would overlap
+                    const lastOverlapping = [...generatedEffects]
+                        .filter(e => rangesOverlap(startTime, endTime, e.startTime, e.endTime))
+                        .sort((a, b) => b.endTime - a.endTime)[0];
+                    if (lastOverlapping) {
+                        adjustedStart = lastOverlapping.endTime;
+                    }
+                }
+
+                const effect: Effect = {
+                    id: `zoom-auto-${index}-${Date.now()}`,
+                    type: 'zoom',
+                    startTime: adjustedStart,
+                    endTime: adjustedStart + zoomDuration,
+                    lane,
+                    scale: 1.5,
+                    targetX: click.x, // Use normalized click position
+                    targetY: click.y,
+                    easingCurve: [...DEFAULT_EASING_CURVE], // Clone default curve
+                };
+
+                generatedEffects.push(effect);
+            });
+
+        if (generatedEffects.length > 0) {
+            console.log("Auto-generated zoom effects from double-clicks:", generatedEffects);
+            setEffects(generatedEffects);
+        }
+    }, [videoLoaded, clickEvents]);
+
     // Playback controls
     const togglePlay = () => {
         const video = videoRef.current;
@@ -256,6 +357,7 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
             newEffect.scale = 1.5;
             newEffect.targetX = 0.5;
             newEffect.targetY = 0.5;
+            newEffect.easingCurve = [...DEFAULT_EASING_CURVE]; // Clone default curve
         } else if (type === 'blur') {
             newEffect.intensity = 5;
         } else if (type === 'slowmo') {
@@ -445,17 +547,32 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
         }
     };
 
-    // Calculate zoom transform for preview
+    // Calculate zoom transform for preview with easing
     const getVideoTransform = () => {
         const zoomEffect = activeEffects.find(e => e.type === 'zoom');
         if (!zoomEffect || !zoomEffect.scale) return {};
 
-        const scale = zoomEffect.scale;
-        const translateX = (0.5 - (zoomEffect.targetX || 0.5)) * (scale - 1) * 100;
-        const translateY = (0.5 - (zoomEffect.targetY || 0.5)) * (scale - 1) * 100;
+        // Calculate progress within the zoom effect (0-1)
+        const effectDuration = zoomEffect.endTime - zoomEffect.startTime;
+        const progress = effectDuration > 0
+            ? (currentTime - zoomEffect.startTime) / effectDuration
+            : 0;
+
+        // Get easing curve (use default if not set)
+        const curve = zoomEffect.easingCurve || DEFAULT_EASING_CURVE;
+        const easedIntensity = sampleEasingCurve(curve, progress);
+
+        // Interpolate scale: 1 (no zoom) -> target scale based on easing
+        const targetScale = zoomEffect.scale;
+        const currentScale = 1 + (targetScale - 1) * easedIntensity;
+
+        // Only apply transform if there's actual zoom
+        if (currentScale <= 1.001) return {};
+
+        const translateX = (0.5 - (zoomEffect.targetX || 0.5)) * (currentScale - 1) * 100;
+        const translateY = (0.5 - (zoomEffect.targetY || 0.5)) * (currentScale - 1) * 100;
         return {
-            transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
-            transition: 'transform 0.3s ease-out'
+            transform: `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`,
         };
     };
 
@@ -699,19 +816,98 @@ function VideoEditor({ videoPath, onClose }: VideoEditorProps) {
                         </span>
 
                         {selectedEffect.type === 'zoom' && (
-                            <label>
-                                Scale: {(selectedEffect.scale || 1.5).toFixed(1)}x
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="3"
-                                    step="0.1"
-                                    value={selectedEffect.scale || 1.5}
-                                    onChange={(e) => updateEffect(selectedEffect.id, {
-                                        scale: parseFloat(e.target.value)
+                            <>
+                                <label>
+                                    Scale: {(selectedEffect.scale || 1.5).toFixed(1)}x
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="3"
+                                        step="0.1"
+                                        value={selectedEffect.scale || 1.5}
+                                        onChange={(e) => updateEffect(selectedEffect.id, {
+                                            scale: parseFloat(e.target.value)
+                                        })}
+                                    />
+                                </label>
+
+                                {/* Easing Curve Editor */}
+                                <div className="easing-curve-editor">
+                                    <span className="easing-label">Zoom Timing</span>
+                                    <svg
+                                        className="easing-curve-graph"
+                                        viewBox="0 0 100 50"
+                                        preserveAspectRatio="none"
+                                    >
+                                        {/* Grid lines */}
+                                        <line x1="0" y1="25" x2="100" y2="25" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
+                                        <line x1="20" y1="0" x2="20" y2="50" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
+                                        <line x1="80" y1="0" x2="80" y2="50" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
+
+                                        {/* Curve path */}
+                                        <path
+                                            d={`M ${(selectedEffect.easingCurve || DEFAULT_EASING_CURVE)
+                                                .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.t * 100} ${50 - p.value * 50}`)
+                                                .join(' ')}`}
+                                            fill="none"
+                                            stroke="#10b981"
+                                            strokeWidth="2"
+                                        />
+
+                                        {/* Control points */}
+                                        {(selectedEffect.easingCurve || DEFAULT_EASING_CURVE).map((point, index) => (
+                                            <circle
+                                                key={index}
+                                                cx={point.t * 100}
+                                                cy={50 - point.value * 50}
+                                                r="4"
+                                                fill={index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? "#666" : "#10b981"}
+                                                stroke="#fff"
+                                                strokeWidth="1"
+                                                style={{ cursor: index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? 'default' : 'ns-resize' }}
+                                                onMouseDown={(e) => {
+                                                    // Don't allow dragging first/last points
+                                                    if (index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1) return;
+                                                    e.stopPropagation();
+                                                    const svg = e.currentTarget.closest('svg');
+                                                    if (!svg) return;
+
+                                                    const handleDrag = (moveEvent: MouseEvent) => {
+                                                        const rect = svg.getBoundingClientRect();
+                                                        const y = (moveEvent.clientY - rect.top) / rect.height;
+                                                        const newValue = Math.max(0, Math.min(1, 1 - y));
+
+                                                        const newCurve = [...(selectedEffect.easingCurve || DEFAULT_EASING_CURVE)];
+                                                        newCurve[index] = { ...newCurve[index], value: newValue };
+                                                        updateEffect(selectedEffect.id, { easingCurve: newCurve });
+                                                    };
+
+                                                    const handleUp = () => {
+                                                        window.removeEventListener('mousemove', handleDrag);
+                                                        window.removeEventListener('mouseup', handleUp);
+                                                    };
+
+                                                    window.addEventListener('mousemove', handleDrag);
+                                                    window.addEventListener('mouseup', handleUp);
+                                                }}
+                                            />
+                                        ))}
+                                    </svg>
+                                    <div className="easing-labels">
+                                        <span>Start</span>
+                                        <span>End</span>
+                                    </div>
+                                </div>
+
+                                <button
+                                    className="reset-curve-btn"
+                                    onClick={() => updateEffect(selectedEffect.id, {
+                                        easingCurve: [...DEFAULT_EASING_CURVE]
                                     })}
-                                />
-                            </label>
+                                >
+                                    Reset Curve
+                                </button>
+                            </>
                         )}
 
                         {selectedEffect.type === 'blur' && (

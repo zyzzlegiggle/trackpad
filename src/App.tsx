@@ -9,6 +9,14 @@ interface WindowInfo {
   title: string;
 }
 
+// Click event from backend
+interface ClickEvent {
+  timestamp_ms: number;
+  x: number;
+  y: number;
+  is_double_click: boolean;
+}
+
 function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState("Ready");
@@ -20,6 +28,7 @@ function App() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [editorMode, setEditorMode] = useState(false);
   const [lastRecordedFile, setLastRecordedFile] = useState("");
+  const [recordedClicks, setRecordedClicks] = useState<ClickEvent[]>([]);
 
   // Preview state - uncomment to enable
   // const [livePreviewSrc, setLivePreviewSrc] = useState("");
@@ -94,6 +103,17 @@ function App() {
         await new Promise(resolve => setTimeout(resolve, 1500));
 
         setStatus("Saved!");
+
+        // Fetch recorded click events
+        try {
+          const clicks = await invoke<ClickEvent[]>("get_recorded_clicks");
+          console.log("Recorded clicks:", clicks);
+          setRecordedClicks(clicks);
+        } catch (e) {
+          console.error("Failed to get recorded clicks:", e);
+          setRecordedClicks([]);
+        }
+
         // Open editor with the recorded file
         setLastRecordedFile(filename);
         setEditorMode(true);
@@ -135,7 +155,7 @@ function App() {
 
   // Show editor if in editor mode
   if (editorMode && lastRecordedFile) {
-    return <VideoEditor videoPath={lastRecordedFile} onClose={handleEditorClose} />;
+    return <VideoEditor videoPath={lastRecordedFile} onClose={handleEditorClose} clickEvents={recordedClicks} />;
   }
 
   return (

@@ -28,4 +28,5 @@ rdev = "0.5"
 base64 = "0.21"
 chrono = "0.4"
 dirs = "5"
+lazy_static = "1.4"
 

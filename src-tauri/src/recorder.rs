@@ -2,6 +2,7 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
 use tauri::State;
@@ -17,6 +18,23 @@ use windows_capture::{
     monitor::Monitor,
     window::Window,
 };
+
+// Click event captured during recording
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ClickEvent {
+    pub timestamp_ms: u64,      // Time since recording start
+    pub x: f64,                 // Normalized X (0.0 - 1.0)
+    pub y: f64,                 // Normalized Y (0.0 - 1.0)
+    pub is_double_click: bool,  // True if this was a double-click
+}
+
+// Global storage for click events during recording
+lazy_static::lazy_static! {
+    static ref CLICK_EVENTS: Mutex<Vec<ClickEvent>> = Mutex::new(Vec::new());
+    static ref RECORDING_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
+    static ref LAST_CLICK: Mutex<Option<(Instant, f64, f64)>> = Mutex::new(None);
+    static ref SCREEN_SIZE: Mutex<(u32, u32)> = Mutex::new((1920, 1080));
+}
 
 pub struct RecorderState {
     pub is_recording: Arc<AtomicBool>,
@@ -187,6 +205,118 @@ pub fn get_open_windows() -> Vec<WindowInfo> {
     result
 }
 
+// Spawn a mouse listener thread that captures clicks during recording
+fn spawn_mouse_listener(stop_signal: Arc<AtomicBool>) {
+    use rdev::{listen, Event, EventType, Button};
+    
+    thread::spawn(move || {
+        let callback = move |event: Event| {
+            // Only process while recording
+            if !stop_signal.load(Ordering::Relaxed) {
+                return;
+            }
+            
+            if let EventType::ButtonPress(Button::Left) = event.event_type {
+                let now = Instant::now();
+                
+                // Get screen size for normalization
+                let (screen_w, screen_h) = *SCREEN_SIZE.lock().unwrap();
+                
+                // Get mouse position (rdev provides screen coordinates)
+                let (x, y) = match (event.name, event.time) {
+                    _ => {
+                        // rdev doesn't give position in ButtonPress, we need to track it
+                        // Use MouseMove events to track position
+                        (0.0, 0.0)
+                    }
+                };
+                
+                // We'll track position from MouseMove events
+                // For now, we'll capture the click without position
+                // and update this logic
+            }
+        };
+        
+        // This blocks, so it runs in its own thread
+        if let Err(e) = listen(callback) {
+            eprintln!("Mouse listener error: {:?}", e);
+        }
+    });
+}
+
+// Better mouse listener that tracks position
+fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
+    use rdev::{listen, Event, EventType, Button};
+    
+    thread::spawn(move || {
+        let mut last_mouse_x: f64 = 0.0;
+        let mut last_mouse_y: f64 = 0.0;
+        
+        let callback = move |event: Event| {
+            // Track mouse position from move events
+            if let EventType::MouseMove { x, y } = event.event_type {
+                last_mouse_x = x;
+                last_mouse_y = y;
+                return;
+            }
+            
+            // Only process clicks while recording
+            if !stop_signal.load(Ordering::Relaxed) {
+                return;
+            }
+            
+            if let EventType::ButtonPress(Button::Left) = event.event_type {
+                let now = Instant::now();
+                
+                // Get screen size for normalization
+                let (screen_w, screen_h) = *SCREEN_SIZE.lock().unwrap();
+                let norm_x = last_mouse_x / screen_w as f64;
+                let norm_y = last_mouse_y / screen_h as f64;
+                
+                // Get timestamp since recording start
+                let timestamp_ms = {
+                    if let Some(start) = *RECORDING_START_TIME.lock().unwrap() {
+                        now.duration_since(start).as_millis() as u64
+                    } else {
+                        0
+                    }
+                };
+                
+                // Check for double-click (within 500ms and close position)
+                let is_double_click = {
+                    let mut last_click = LAST_CLICK.lock().unwrap();
+                    let is_double = if let Some((last_time, last_x, last_y)) = *last_click {
+                        let time_diff = now.duration_since(last_time).as_millis();
+                        let dist = ((norm_x - last_x).powi(2) + (norm_y - last_y).powi(2)).sqrt();
+                        time_diff < 500 && dist < 0.05
+                    } else {
+                        false
+                    };
+                    *last_click = Some((now, norm_x, norm_y));
+                    is_double
+                };
+                
+                // Only store double-clicks (that's what triggers zoom)
+                if is_double_click {
+                    let click_event = ClickEvent {
+                        timestamp_ms,
+                        x: norm_x,
+                        y: norm_y,
+                        is_double_click: true,
+                    };
+                    println!("Double-click captured at {:.2}, {:.2} @ {}ms", norm_x, norm_y, timestamp_ms);
+                    CLICK_EVENTS.lock().unwrap().push(click_event);
+                }
+            }
+        };
+        
+        // This blocks until an error or the process ends
+        if let Err(e) = listen(callback) {
+            eprintln!("Mouse listener error: {:?}", e);
+        }
+    });
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct RecordTarget {
     #[serde(rename = "type")]
@@ -200,8 +330,22 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
         return Err("Already recording".to_string());
     }
    
+    // Clear previous click events and initialize tracking
+    CLICK_EVENTS.lock().unwrap().clear();
+    *LAST_CLICK.lock().unwrap() = None;
+    *RECORDING_START_TIME.lock().unwrap() = Some(Instant::now());
+    
+    // Get screen size for coordinate normalization
+    let primary_monitor = Monitor::primary().expect("No primary monitor");
+    let screen_w = primary_monitor.width().unwrap_or(1920);
+    let screen_h = primary_monitor.height().unwrap_or(1080);
+    *SCREEN_SIZE.lock().unwrap() = (screen_w, screen_h);
+    
     state.is_recording.store(true, Ordering::Relaxed);
     let signal = state.is_recording.clone();
+    
+    // Spawn mouse listener in background
+    spawn_mouse_listener_v2(signal.clone());
    
     thread::spawn(move || {
         // Determine capture source based on target
@@ -288,5 +432,13 @@ pub fn stop_recording(state: State<'_, RecorderState>) -> Result<(), String> {
         return Err("Not recording".to_string());
     }
     state.is_recording.store(false, Ordering::Relaxed);
+    *RECORDING_START_TIME.lock().unwrap() = None;
     Ok(())
+}
+
+// Get recorded click events (call after stopping recording)
+#[tauri::command]
+pub fn get_recorded_clicks() -> Vec<ClickEvent> {
+    let events = CLICK_EVENTS.lock().unwrap();
+    events.clone()
 }

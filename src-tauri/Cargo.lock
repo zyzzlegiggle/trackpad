@@ -4521,6 +4521,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "image",
+ "lazy_static",
  "rdev",
  "serde",
  "serde_json",
