@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+/* Custom theme extending Tailwind's defaults */
+@theme {
+    /* Colors from existing design system */
+    --color-bg-body: #f5f5f7;
+    --color-bg-panel: #ffffff;
+    --color-bg-hover: #f0f0f2;
+    --color-border: rgba(0, 0, 0, 0.08);
+    --color-text-main: #1a1a1a;
+    --color-text-muted: #666666;
+    --color-text-dim: #999999;
+    --color-accent-red: #ef4444;
+    --color-accent-red-glow: rgba(239, 68, 68, 0.2);
+    --color-accent-blue: #6366f1;
+    --color-accent-green: #40c057;
+
+    /* Editor-specific colors */
+    --color-editor-bg: #f8f9fa;
+    --color-editor-dark: #1a1a1a;
+    --color-trim-primary: #748ffc;
+    --color-trim-secondary: #5c7cfa;
+    --color-playhead: #fa5252;
+
+    /* Spacing */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 24px;
+
+    /* Shadows */
+    --shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+
+    /* Font families */
+    --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SF Mono', 'Consolas', monospace;
+
+    /* Animations */
+    --animate-ring-pulse: ring-pulse 2s ease-in-out infinite;
+    --animate-dot-pulse: dot-pulse 1s ease-in-out infinite;
+    --animate-fade-in: fade-in 0.2s ease;
+    --animate-slide-up: slide-up 0.3s ease;
+}
+
+/* Keyframe animations */
+@keyframes ring-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 4px var(--color-accent-red-glow);
+    }
+
+    50% {
+        box-shadow: 0 0 0 12px rgba(255, 68, 68, 0.15);
+    }
+}
+
+@keyframes dot-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slide-up {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Base styles */
+@layer base {
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+
+    html,
+    body {
+        height: 100%;
+        overflow: hidden;
+        background-color: var(--color-bg-body);
+        color: var(--color-text-main);
+        font-family: var(--font-sans);
+        line-height: 1.5;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    :disabled {
+        opacity: 0.4;
+        cursor: not-allowed !important;
+    }
+}
+
+/* Custom range slider styling */
+@layer components {
+    .range-slider {
+        @apply flex-1 h-1 appearance-none bg-gray-300 rounded cursor-pointer;
+    }
+
+    .range-slider::-webkit-slider-thumb {
+        @apply appearance-none w-3.5 h-3.5 bg-gray-600 rounded-full cursor-pointer transition-colors;
+    }
+
+    .range-slider::-webkit-slider-thumb:hover {
+        @apply bg-gray-800;
+    }
+}

@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import "./VideoEditor.css";
 
 // Click event from recording
 interface ClickEvent {
@@ -594,43 +593,46 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
     }
 
     return (
-        <div className="editor-container">
+        <div className="flex h-screen w-screen bg-gray-50 overflow-hidden">
             {/* Left Main Panel - Video, Toolbar, Timeline */}
-            <div className="editor-main">
+            <div className="flex-1 flex flex-col p-4 min-w-0">
                 {/* Header Bar */}
-                <div className="editor-header">
-                    <button className="back-btn" onClick={onClose}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <div className="flex items-center gap-3 mb-3 shrink-0">
+                    <button
+                        className="w-8 h-8 border-none bg-gray-200 rounded-lg cursor-pointer flex items-center justify-center text-gray-600 transition-all duration-200 hover:bg-gray-300 hover:text-gray-900"
+                        onClick={onClose}
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                             <polyline points="15,18 9,12 15,6" />
                         </svg>
                     </button>
-                    <span className="editor-title">Edit Recording</span>
-                    <div className="header-spacer" />
+                    <span className="text-base font-semibold text-gray-900">Edit Recording</span>
+                    <div className="flex-1" />
                 </div>
 
                 {/* Video Preview */}
-                <div className="video-container">
+                <div className="relative flex-1 min-h-0 bg-gray-900 rounded-xl overflow-hidden flex flex-col">
                     {videoError && (
-                        <div className="video-error">
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-red-500 text-sm z-10">
                             <span>{videoError}</span>
                         </div>
                     )}
                     {!videoLoaded && !videoError && (
-                        <div className="video-loading">Loading video...</div>
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400 text-sm z-10">Loading video...</div>
                     )}
-                    <div className="video-wrapper" style={{ ...getVideoTransform(), ...getVideoFilter() }}>
+                    <div className="flex-1 flex items-center justify-center origin-center" style={{ ...getVideoTransform(), ...getVideoFilter() }}>
                         <video
                             ref={videoRef}
                             src={videoUrl}
-                            className="video-player"
+                            className="max-w-full max-h-full object-contain"
                             onClick={togglePlay}
                             style={{ display: videoError ? 'none' : 'block' }}
                         />
                     </div>
-                    <div className="video-overlay" onClick={togglePlay}>
+                    <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
                         {!isPlaying && videoLoaded && (
-                            <div className="play-button-overlay">
-                                <svg viewBox="0 0 24 24" fill="currentColor">
+                            <div className="w-14 h-14 bg-white/95 rounded-full flex items-center justify-center shadow-lg transition-transform duration-200 hover:scale-110">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5.5 h-5.5 text-gray-900 ml-0.5">
                                     <polygon points="5,3 19,12 5,21" />
                                 </svg>
                             </div>
@@ -638,35 +640,38 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                     </div>
 
                     {/* Playback Controls Bar */}
-                    <div className="playback-bar">
-                        <button className="playback-btn" onClick={togglePlay}>
+                    <div className="flex items-center gap-3 px-4 py-2 bg-black/60 backdrop-blur-sm">
+                        <button
+                            className="w-8 h-8 border-none bg-transparent rounded-md cursor-pointer flex items-center justify-center text-white transition-colors duration-200 hover:bg-white/15"
+                            onClick={togglePlay}
+                        >
                             {isPlaying ? (
-                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                                     <rect x="6" y="4" width="4" height="16" />
                                     <rect x="14" y="4" width="4" height="16" />
                                 </svg>
                             ) : (
-                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                                     <polygon points="5,3 19,12 5,21" />
                                 </svg>
                             )}
                         </button>
-                        <div className="time-display">
-                            <span className="current-time">{formatTimeDetailed(currentTime)}</span>
-                            <span className="time-separator">/</span>
-                            <span className="total-time">{formatTimeDetailed(duration)}</span>
+                        <div className="flex items-center gap-1 font-mono text-sm text-white">
+                            <span>{formatTimeDetailed(currentTime)}</span>
+                            <span className="text-white/50">/</span>
+                            <span className="text-white/70">{formatTimeDetailed(duration)}</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Toolbar */}
-                <div className="toolbar">
+                <div className="flex items-center gap-2 py-3 shrink-0">
                     <button
-                        className="tool-btn"
+                        className="w-10 h-10 border border-gray-300 bg-white rounded-lg cursor-pointer flex items-center justify-center text-gray-600 transition-all duration-200 hover:bg-gray-100 hover:border-gray-400 hover:text-gray-900"
                         onClick={() => addEffect('zoom')}
                         title="Add Zoom Effect"
                     >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                             <circle cx="11" cy="11" r="8" />
                             <line x1="21" y1="21" x2="16.65" y2="16.65" />
                             <line x1="11" y1="8" x2="11" y2="14" />
@@ -674,34 +679,34 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                         </svg>
                     </button>
                     <button
-                        className="tool-btn"
+                        className="w-10 h-10 border border-gray-300 bg-white rounded-lg cursor-pointer flex items-center justify-center text-gray-600 transition-all duration-200 hover:bg-gray-100 hover:border-gray-400 hover:text-gray-900"
                         onClick={() => addEffect('blur')}
                         title="Add Blur Effect"
                     >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                             <circle cx="12" cy="12" r="10" />
                             <circle cx="12" cy="12" r="6" />
                             <circle cx="12" cy="12" r="2" />
                         </svg>
                     </button>
                     <button
-                        className="tool-btn"
+                        className="w-10 h-10 border border-gray-300 bg-white rounded-lg cursor-pointer flex items-center justify-center text-gray-600 transition-all duration-200 hover:bg-gray-100 hover:border-gray-400 hover:text-gray-900"
                         onClick={() => addEffect('slowmo')}
                         title="Add Slow-Mo Effect"
                     >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                             <circle cx="12" cy="12" r="10" />
                             <polyline points="12,6 12,12 16,14" />
                         </svg>
                     </button>
-                    <div className="tool-divider" />
+                    <div className="w-px h-6 bg-gray-300 mx-1" />
                     {selectedEffectId && (
                         <button
-                            className="tool-btn tool-btn-danger"
+                            className="w-10 h-10 border border-red-200 bg-white rounded-lg cursor-pointer flex items-center justify-center text-red-600 transition-all duration-200 hover:bg-red-50 hover:border-red-600"
                             onClick={() => removeEffect(selectedEffectId)}
                             title="Delete Selected Effect"
                         >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                                 <polyline points="3,6 5,6 21,6" />
                                 <path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6" />
                             </svg>
@@ -710,13 +715,13 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                 </div>
 
                 {/* Timeline */}
-                <div className="timeline-section">
+                <div className="bg-white rounded-xl px-4 py-3 shrink-0 border border-gray-200">
                     {/* Time Markers */}
-                    <div className="time-markers">
+                    <div className="relative h-5 mb-2">
                         {generateTimeMarkers().map(time => (
                             <div
                                 key={time}
-                                className="time-marker"
+                                className="absolute -translate-x-1/2 text-[10px] text-gray-500 font-mono after:content-[''] after:absolute after:left-1/2 after:top-3.5 after:w-px after:h-1.5 after:bg-gray-300"
                                 style={{ left: `${(time / timelineDuration) * 100}%` }}
                             >
                                 <span>{formatTime(time)}</span>
@@ -725,28 +730,28 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                     </div>
 
                     {/* Timeline Tracks */}
-                    <div className="timeline-tracks-wrapper" ref={tracksContainerRef}>
+                    <div className="max-h-28 overflow-y-auto scrollbar-thin" ref={tracksContainerRef}>
                         <div
-                            className="timeline-tracks"
+                            className="relative flex flex-col gap-1.5 min-h-10 cursor-pointer"
                             ref={timelineRef}
                             onClick={handleTimelineClick}
                         >
                             {/* Video/Trim Track */}
-                            <div className="track">
+                            <div className="h-9 bg-gray-100 rounded-md relative">
                                 <div
-                                    className="trim-region"
+                                    className="absolute top-1 bottom-1 bg-gradient-to-br from-indigo-400 to-indigo-500 rounded flex items-center justify-center min-w-10"
                                     style={{
                                         left: `${(trimStart / timelineDuration) * 100}%`,
                                         width: `${((trimEnd - trimStart) / timelineDuration) * 100}%`
                                     }}
                                 >
                                     <div
-                                        className="trim-handle trim-handle-left"
+                                        className="trim-handle absolute top-0 bottom-0 left-0 w-2 bg-black/20 cursor-ew-resize transition-colors duration-200 hover:bg-black/40 rounded-l"
                                         onMouseDown={handleTrimStartDrag}
                                     />
-                                    <span className="trim-label">✂ Trim</span>
+                                    <span className="text-[10px] text-white font-medium opacity-90">✂ Trim</span>
                                     <div
-                                        className="trim-handle trim-handle-right"
+                                        className="trim-handle absolute top-0 bottom-0 right-0 w-2 bg-black/20 cursor-ew-resize transition-colors duration-200 hover:bg-black/40 rounded-r"
                                         onMouseDown={handleTrimEndDrag}
                                     />
                                 </div>
@@ -754,14 +759,14 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
 
                             {/* Effect Lanes */}
                             {effectsByLane.map((laneEffects, laneIndex) => (
-                                <div key={laneIndex} className="track effect-track">
+                                <div key={laneIndex} className="h-9 bg-gray-50 rounded-md relative">
                                     {laneEffects.map(effect => {
                                         const config = EFFECT_CONFIG[effect.type];
                                         const isSelected = selectedEffectId === effect.id;
                                         return (
                                             <div
                                                 key={effect.id}
-                                                className={`effect-segment ${isSelected ? 'selected' : ''}`}
+                                                className={`effect-segment absolute top-1 bottom-1 rounded flex items-center justify-center cursor-grab min-w-8 z-[2] select-none transition-shadow duration-200 hover:shadow-md active:cursor-grabbing ${isSelected ? 'shadow-[0_0_0_2px_white,0_0_0_4px_currentColor] z-[3]' : ''}`}
                                                 style={{
                                                     left: `${(effect.startTime / timelineDuration) * 100}%`,
                                                     width: `${((effect.endTime - effect.startTime) / timelineDuration) * 100}%`,
@@ -770,15 +775,15 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                                 onMouseDown={(e) => handleEffectMoveStart(e, effect)}
                                             >
                                                 <div
-                                                    className="effect-handle effect-handle-left"
+                                                    className="effect-handle absolute top-0 bottom-0 left-0 w-1.5 cursor-ew-resize z-[3] transition-colors duration-200 hover:bg-white/30 rounded-l"
                                                     onMouseDown={(e) => {
                                                         e.stopPropagation();
                                                         setIsDragging(`${effect.id}-start`);
                                                     }}
                                                 />
-                                                <span className="effect-label">{config.label}</span>
+                                                <span className="text-[10px] font-semibold text-white pointer-events-none drop-shadow-sm">{config.label}</span>
                                                 <div
-                                                    className="effect-handle effect-handle-right"
+                                                    className="effect-handle absolute top-0 bottom-0 right-0 w-1.5 cursor-ew-resize z-[3] transition-colors duration-200 hover:bg-white/30 rounded-r"
                                                     onMouseDown={(e) => {
                                                         e.stopPropagation();
                                                         setIsDragging(`${effect.id}-end`);
@@ -792,7 +797,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
 
                             {/* Playhead */}
                             <div
-                                className="playhead"
+                                className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10 pointer-events-none before:content-[''] before:absolute before:-top-1 before:left-1/2 before:-translate-x-1/2 before:border-l-[6px] before:border-r-[6px] before:border-t-[6px] before:border-l-transparent before:border-r-transparent before:border-t-red-500"
                                 style={{ left: `${(currentTime / timelineDuration) * 100}%` }}
                             />
                         </div>
@@ -801,14 +806,14 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
             </div>
 
             {/* Right Sidebar: Settings */}
-            <div className="editor-sidebar">
+            <div className="w-72 bg-white border-l border-gray-200 p-5 flex flex-col gap-4 overflow-y-auto shrink-0">
                 {/* Export Button */}
                 <button
-                    className="export-btn"
+                    className="flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-br from-green-500 to-green-600 border-none rounded-xl text-white text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-green-500/30 hover:translate-y-[-1px] hover:shadow-xl hover:shadow-green-500/40 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                     onClick={handleExport}
                     disabled={isExporting}
                 >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                         <path d="M21,15V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V15" />
                         <polyline points="17,8 12,3 7,8" />
                         <line x1="12" y1="3" x2="12" y2="15" />
@@ -818,27 +823,27 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
 
                 {/* Quick Save */}
                 <button
-                    className="save-btn"
+                    className="px-4 py-2.5 bg-transparent border border-gray-300 rounded-lg text-gray-600 text-sm font-medium cursor-pointer transition-all duration-200 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleSaveOriginal}
                     disabled={isExporting}
                 >
                     Keep Original
                 </button>
 
-                <div className="sidebar-divider" />
+                <div className="h-px bg-gray-200" />
 
                 {/* Effect Settings */}
                 {selectedEffect ? (
-                    <div className="settings-section">
-                        <h3 className="settings-title" style={{ color: EFFECT_CONFIG[selectedEffect.type].color }}>
+                    <div className="flex flex-col gap-3">
+                        <h3 className="text-sm font-semibold m-0" style={{ color: EFFECT_CONFIG[selectedEffect.type].color }}>
                             {EFFECT_CONFIG[selectedEffect.type].label} Settings
                         </h3>
 
                         {selectedEffect.type === 'zoom' && (
                             <>
-                                <div className="setting-row">
-                                    <label>Scale</label>
-                                    <div className="setting-control">
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-xs text-gray-600 font-medium">Scale</label>
+                                    <div className="flex items-center gap-2.5">
                                         <input
                                             type="range"
                                             min="1"
@@ -848,18 +853,19 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                             onChange={(e) => updateEffect(selectedEffect.id, {
                                                 scale: parseFloat(e.target.value)
                                             })}
+                                            className="range-slider"
                                         />
-                                        <span className="setting-value">{(selectedEffect.scale || 1.5).toFixed(1)}x</span>
+                                        <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{(selectedEffect.scale || 1.5).toFixed(1)}x</span>
                                     </div>
                                 </div>
 
                                 {/* Easing Curve Editor */}
-                                <div className="setting-row">
-                                    <label>Zoom Timing</label>
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-xs text-gray-600 font-medium">Zoom Timing</label>
                                 </div>
-                                <div className="easing-curve-editor">
+                                <div className="flex flex-col gap-1.5">
                                     <svg
-                                        className="easing-curve-graph"
+                                        className="w-full h-14 bg-gray-900 rounded-md border border-gray-700"
                                         viewBox="0 0 100 50"
                                         preserveAspectRatio="none"
                                     >
@@ -885,7 +891,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                                 fill={index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? "#666" : "#10b981"}
                                                 stroke="#fff"
                                                 strokeWidth="1"
-                                                style={{ cursor: index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? 'default' : 'ns-resize' }}
+                                                className={`transition-colors duration-100 ${index !== 0 && index !== (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? 'hover:fill-green-400 cursor-ns-resize' : 'cursor-default'}`}
                                                 onMouseDown={(e) => {
                                                     if (index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1) return;
                                                     e.stopPropagation();
@@ -913,12 +919,12 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                             />
                                         ))}
                                     </svg>
-                                    <div className="easing-labels">
+                                    <div className="flex justify-between text-[10px] text-gray-500">
                                         <span>Start</span>
                                         <span>End</span>
                                     </div>
                                     <button
-                                        className="reset-curve-btn"
+                                        className="px-2.5 py-1.5 bg-transparent text-gray-600 border border-gray-300 rounded-md text-[11px] cursor-pointer transition-all duration-200 self-start hover:bg-gray-50 hover:border-green-500 hover:text-green-600"
                                         onClick={() => updateEffect(selectedEffect.id, {
                                             easingCurve: [...DEFAULT_EASING_CURVE]
                                         })}
@@ -930,9 +936,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                         )}
 
                         {selectedEffect.type === 'blur' && (
-                            <div className="setting-row">
-                                <label>Intensity</label>
-                                <div className="setting-control">
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-xs text-gray-600 font-medium">Intensity</label>
+                                <div className="flex items-center gap-2.5">
                                     <input
                                         type="range"
                                         min="1"
@@ -942,16 +948,17 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                         onChange={(e) => updateEffect(selectedEffect.id, {
                                             intensity: parseInt(e.target.value)
                                         })}
+                                        className="range-slider"
                                     />
-                                    <span className="setting-value">{selectedEffect.intensity || 5}px</span>
+                                    <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{selectedEffect.intensity || 5}px</span>
                                 </div>
                             </div>
                         )}
 
                         {selectedEffect.type === 'slowmo' && (
-                            <div className="setting-row">
-                                <label>Speed</label>
-                                <div className="setting-control">
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-xs text-gray-600 font-medium">Speed</label>
+                                <div className="flex items-center gap-2.5">
                                     <input
                                         type="range"
                                         min="0.1"
@@ -961,26 +968,27 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                         onChange={(e) => updateEffect(selectedEffect.id, {
                                             speed: parseFloat(e.target.value)
                                         })}
+                                        className="range-slider"
                                     />
-                                    <span className="setting-value">{((selectedEffect.speed || 0.5) * 100).toFixed(0)}%</span>
+                                    <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{((selectedEffect.speed || 0.5) * 100).toFixed(0)}%</span>
                                 </div>
                             </div>
                         )}
                     </div>
                 ) : (
-                    <div className="settings-section settings-empty">
+                    <div className="flex flex-col gap-3 text-gray-500 text-sm text-center py-5">
                         <span>Select an effect to edit</span>
                     </div>
                 )}
 
-                <div className="sidebar-divider" />
+                <div className="h-px bg-gray-200" />
 
                 {/* Trim Info */}
-                <div className="trim-info-sidebar">
-                    <h3 className="settings-title">Trim</h3>
-                    <div className="trim-values">
+                <div className="flex flex-col gap-2">
+                    <h3 className="text-sm font-semibold m-0">Trim</h3>
+                    <div className="flex flex-col gap-1 text-xs text-gray-600">
                         <span>{formatTimeDetailed(trimStart)} - {formatTimeDetailed(trimEnd)}</span>
-                        <span className="trim-duration">{formatTimeDetailed(trimEnd - trimStart)}</span>
+                        <span className="font-semibold text-indigo-500">{formatTimeDetailed(trimEnd - trimStart)}</span>
                     </div>
                 </div>
             </div>

@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import "./Overlay.css";
 
 function Overlay() {
     // Placeholder state for future mouse tracking
@@ -11,10 +10,13 @@ function Overlay() {
     }, []);
 
     return (
-        <div className="overlay-container">
+        <div className="w-screen h-screen bg-transparent pointer-events-none overflow-hidden relative">
             {/* Visual placeholder for effect */}
-            <div className="cursor-halo" style={{ left: '50%', top: '50%' }} />
-            <div className="debug-info">Overlay Active</div>
+            <div
+                className="absolute w-12 h-12 rounded-full bg-yellow-400/30 border-2 border-yellow-400/60 pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-100 shadow-[0_0_15px_rgba(255,255,0,0.4)]"
+                style={{ left: '50%', top: '50%' }}
+            />
+            <div className="absolute top-2.5 left-2.5 text-white bg-black/50 p-1.5 font-mono">Overlay Active</div>
         </div>
     );
 }
