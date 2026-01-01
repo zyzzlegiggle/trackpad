@@ -595,16 +595,17 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
 
     return (
         <div className="editor-container">
-            <div className="editor-panel">
-                {/* Header */}
+            {/* Left Main Panel - Video, Toolbar, Timeline */}
+            <div className="editor-main">
+                {/* Header Bar */}
                 <div className="editor-header">
-                    <h2>Edit Recording</h2>
-                    <button className="close-btn" onClick={onClose}>
+                    <button className="back-btn" onClick={onClose}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
+                            <polyline points="15,18 9,12 15,6" />
                         </svg>
                     </button>
+                    <span className="editor-title">Edit Recording</span>
+                    <div className="header-spacer" />
                 </div>
 
                 {/* Video Preview */}
@@ -635,20 +636,33 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                             </div>
                         )}
                     </div>
+
+                    {/* Playback Controls Bar */}
+                    <div className="playback-bar">
+                        <button className="playback-btn" onClick={togglePlay}>
+                            {isPlaying ? (
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="4" width="4" height="16" />
+                                    <rect x="14" y="4" width="4" height="16" />
+                                </svg>
+                            ) : (
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5,3 19,12 5,21" />
+                                </svg>
+                            )}
+                        </button>
+                        <div className="time-display">
+                            <span className="current-time">{formatTimeDetailed(currentTime)}</span>
+                            <span className="time-separator">/</span>
+                            <span className="total-time">{formatTimeDetailed(duration)}</span>
+                        </div>
+                    </div>
                 </div>
 
-                {/* Time Display */}
-                <div className="time-display">
-                    <span className="current-time">{formatTimeDetailed(currentTime)}</span>
-                    <span className="time-separator">/</span>
-                    <span className="total-time">{formatTimeDetailed(duration)}</span>
-                </div>
-
-                {/* Effect Buttons Toolbar */}
-                <div className="effects-toolbar">
-                    <span className="toolbar-label">Add Effect:</span>
+                {/* Toolbar */}
+                <div className="toolbar">
                     <button
-                        className="effect-btn effect-btn-zoom"
+                        className="tool-btn"
                         onClick={() => addEffect('zoom')}
                         title="Add Zoom Effect"
                     >
@@ -658,10 +672,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                             <line x1="11" y1="8" x2="11" y2="14" />
                             <line x1="8" y1="11" x2="14" y2="11" />
                         </svg>
-                        Zoom
                     </button>
                     <button
-                        className="effect-btn effect-btn-blur"
+                        className="tool-btn"
                         onClick={() => addEffect('blur')}
                         title="Add Blur Effect"
                     >
@@ -670,10 +683,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                             <circle cx="12" cy="12" r="6" />
                             <circle cx="12" cy="12" r="2" />
                         </svg>
-                        Blur
                     </button>
                     <button
-                        className="effect-btn effect-btn-slowmo"
+                        className="tool-btn"
                         onClick={() => addEffect('slowmo')}
                         title="Add Slow-Mo Effect"
                     >
@@ -681,12 +693,24 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                             <circle cx="12" cy="12" r="10" />
                             <polyline points="12,6 12,12 16,14" />
                         </svg>
-                        Slow-Mo
                     </button>
+                    <div className="tool-divider" />
+                    {selectedEffectId && (
+                        <button
+                            className="tool-btn tool-btn-danger"
+                            onClick={() => removeEffect(selectedEffectId)}
+                            title="Delete Selected Effect"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3,6 5,6 21,6" />
+                                <path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6" />
+                            </svg>
+                        </button>
+                    )}
                 </div>
 
-                {/* Multi-Lane Timeline */}
-                <div className="timeline-wrapper">
+                {/* Timeline */}
+                <div className="timeline-section">
                     {/* Time Markers */}
                     <div className="time-markers">
                         {generateTimeMarkers().map(time => (
@@ -700,102 +724,69 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                         ))}
                     </div>
 
-                    {/* Scrollable Timeline Tracks */}
-                    <div className="timeline-scroll-container" ref={tracksContainerRef}>
+                    {/* Timeline Tracks */}
+                    <div className="timeline-tracks-wrapper" ref={tracksContainerRef}>
                         <div
                             className="timeline-tracks"
                             ref={timelineRef}
                             onClick={handleTimelineClick}
                         >
-                            {/* Video Track - Always first */}
-                            <div className="track video-track">
-                                <div className="track-label">Video</div>
-                                <div className="track-content">
+                            {/* Video/Trim Track */}
+                            <div className="track">
+                                <div
+                                    className="trim-region"
+                                    style={{
+                                        left: `${(trimStart / timelineDuration) * 100}%`,
+                                        width: `${((trimEnd - trimStart) / timelineDuration) * 100}%`
+                                    }}
+                                >
                                     <div
-                                        className="trim-region"
-                                        style={{
-                                            left: `${(trimStart / timelineDuration) * 100}%`,
-                                            width: `${((trimEnd - trimStart) / timelineDuration) * 100}%`
-                                        }}
-                                    >
-                                        <div
-                                            className="trim-handle trim-handle-left"
-                                            onMouseDown={handleTrimStartDrag}
-                                        >
-                                            <div className="handle-grip"></div>
-                                        </div>
-                                        <div
-                                            className="trim-handle trim-handle-right"
-                                            onMouseDown={handleTrimEndDrag}
-                                        >
-                                            <div className="handle-grip"></div>
-                                        </div>
-                                    </div>
+                                        className="trim-handle trim-handle-left"
+                                        onMouseDown={handleTrimStartDrag}
+                                    />
+                                    <span className="trim-label">✂ Trim</span>
+                                    <div
+                                        className="trim-handle trim-handle-right"
+                                        onMouseDown={handleTrimEndDrag}
+                                    />
                                 </div>
                             </div>
 
-                            {/* Effect Lanes - Dynamic */}
+                            {/* Effect Lanes */}
                             {effectsByLane.map((laneEffects, laneIndex) => (
-                                <div key={laneIndex} className="track effect-lane">
-                                    <div className="track-label">
-                                        {laneIndex === 0 ? 'Effects' : ''}
-                                    </div>
-                                    <div className="track-content">
-                                        {laneEffects.map(effect => {
-                                            const config = EFFECT_CONFIG[effect.type];
-                                            const isSelected = selectedEffectId === effect.id;
-                                            return (
+                                <div key={laneIndex} className="track effect-track">
+                                    {laneEffects.map(effect => {
+                                        const config = EFFECT_CONFIG[effect.type];
+                                        const isSelected = selectedEffectId === effect.id;
+                                        return (
+                                            <div
+                                                key={effect.id}
+                                                className={`effect-segment ${isSelected ? 'selected' : ''}`}
+                                                style={{
+                                                    left: `${(effect.startTime / timelineDuration) * 100}%`,
+                                                    width: `${((effect.endTime - effect.startTime) / timelineDuration) * 100}%`,
+                                                    backgroundColor: config.color,
+                                                }}
+                                                onMouseDown={(e) => handleEffectMoveStart(e, effect)}
+                                            >
                                                 <div
-                                                    key={effect.id}
-                                                    className={`effect-segment effect-${effect.type} ${isSelected ? 'selected' : ''}`}
-                                                    style={{
-                                                        left: `${(effect.startTime / timelineDuration) * 100}%`,
-                                                        width: `${((effect.endTime - effect.startTime) / timelineDuration) * 100}%`,
-                                                        backgroundColor: config.color,
+                                                    className="effect-handle effect-handle-left"
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsDragging(`${effect.id}-start`);
                                                     }}
-                                                    onMouseDown={(e) => handleEffectMoveStart(e, effect)}
-                                                >
-                                                    {/* Left handle */}
-                                                    <div
-                                                        className="effect-handle effect-handle-left"
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            setIsDragging(`${effect.id}-start`);
-                                                        }}
-                                                    />
-
-                                                    {/* Label */}
-                                                    <span className="effect-label">{config.label}</span>
-
-                                                    {/* Delete button */}
-                                                    {isSelected && (
-                                                        <button
-                                                            className="effect-delete-btn"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                removeEffect(effect.id);
-                                                            }}
-                                                            title="Delete effect"
-                                                        >
-                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <line x1="18" y1="6" x2="6" y2="18" />
-                                                                <line x1="6" y1="6" x2="18" y2="18" />
-                                                            </svg>
-                                                        </button>
-                                                    )}
-
-                                                    {/* Right handle */}
-                                                    <div
-                                                        className="effect-handle effect-handle-right"
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation();
-                                                            setIsDragging(`${effect.id}-end`);
-                                                        }}
-                                                    />
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                                />
+                                                <span className="effect-label">{config.label}</span>
+                                                <div
+                                                    className="effect-handle effect-handle-right"
+                                                    onMouseDown={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsDragging(`${effect.id}-end`);
+                                                    }}
+                                                />
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             ))}
 
@@ -807,44 +798,75 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                         </div>
                     </div>
                 </div>
+            </div>
 
-                {/* Selected Effect Settings */}
-                {selectedEffect && (
-                    <div className="effect-settings" style={{ borderColor: EFFECT_CONFIG[selectedEffect.type].color }}>
-                        <span className="effect-settings-label" style={{ color: EFFECT_CONFIG[selectedEffect.type].color }}>
+            {/* Right Sidebar: Settings */}
+            <div className="editor-sidebar">
+                {/* Export Button */}
+                <button
+                    className="export-btn"
+                    onClick={handleExport}
+                    disabled={isExporting}
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21,15V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V15" />
+                        <polyline points="17,8 12,3 7,8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    {isExporting ? exportStatus : "Export video"}
+                </button>
+
+                {/* Quick Save */}
+                <button
+                    className="save-btn"
+                    onClick={handleSaveOriginal}
+                    disabled={isExporting}
+                >
+                    Keep Original
+                </button>
+
+                <div className="sidebar-divider" />
+
+                {/* Effect Settings */}
+                {selectedEffect ? (
+                    <div className="settings-section">
+                        <h3 className="settings-title" style={{ color: EFFECT_CONFIG[selectedEffect.type].color }}>
                             {EFFECT_CONFIG[selectedEffect.type].label} Settings
-                        </span>
+                        </h3>
 
                         {selectedEffect.type === 'zoom' && (
                             <>
-                                <label>
-                                    Scale: {(selectedEffect.scale || 1.5).toFixed(1)}x
-                                    <input
-                                        type="range"
-                                        min="1"
-                                        max="3"
-                                        step="0.1"
-                                        value={selectedEffect.scale || 1.5}
-                                        onChange={(e) => updateEffect(selectedEffect.id, {
-                                            scale: parseFloat(e.target.value)
-                                        })}
-                                    />
-                                </label>
+                                <div className="setting-row">
+                                    <label>Scale</label>
+                                    <div className="setting-control">
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="3"
+                                            step="0.1"
+                                            value={selectedEffect.scale || 1.5}
+                                            onChange={(e) => updateEffect(selectedEffect.id, {
+                                                scale: parseFloat(e.target.value)
+                                            })}
+                                        />
+                                        <span className="setting-value">{(selectedEffect.scale || 1.5).toFixed(1)}x</span>
+                                    </div>
+                                </div>
 
                                 {/* Easing Curve Editor */}
+                                <div className="setting-row">
+                                    <label>Zoom Timing</label>
+                                </div>
                                 <div className="easing-curve-editor">
-                                    <span className="easing-label">Zoom Timing</span>
                                     <svg
                                         className="easing-curve-graph"
                                         viewBox="0 0 100 50"
                                         preserveAspectRatio="none"
                                     >
-                                        {/* Grid lines */}
                                         <line x1="0" y1="25" x2="100" y2="25" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
                                         <line x1="20" y1="0" x2="20" y2="50" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
                                         <line x1="80" y1="0" x2="80" y2="50" stroke="#333" strokeWidth="0.5" strokeDasharray="2,2" />
 
-                                        {/* Curve path */}
                                         <path
                                             d={`M ${(selectedEffect.easingCurve || DEFAULT_EASING_CURVE)
                                                 .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.t * 100} ${50 - p.value * 50}`)
@@ -854,7 +876,6 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                             strokeWidth="2"
                                         />
 
-                                        {/* Control points */}
                                         {(selectedEffect.easingCurve || DEFAULT_EASING_CURVE).map((point, index) => (
                                             <circle
                                                 key={index}
@@ -866,7 +887,6 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                                 strokeWidth="1"
                                                 style={{ cursor: index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1 ? 'default' : 'ns-resize' }}
                                                 onMouseDown={(e) => {
-                                                    // Don't allow dragging first/last points
                                                     if (index === 0 || index === (selectedEffect.easingCurve || DEFAULT_EASING_CURVE).length - 1) return;
                                                     e.stopPropagation();
                                                     const svg = e.currentTarget.closest('svg');
@@ -897,98 +917,70 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                                         <span>Start</span>
                                         <span>End</span>
                                     </div>
+                                    <button
+                                        className="reset-curve-btn"
+                                        onClick={() => updateEffect(selectedEffect.id, {
+                                            easingCurve: [...DEFAULT_EASING_CURVE]
+                                        })}
+                                    >
+                                        Reset Curve
+                                    </button>
                                 </div>
-
-                                <button
-                                    className="reset-curve-btn"
-                                    onClick={() => updateEffect(selectedEffect.id, {
-                                        easingCurve: [...DEFAULT_EASING_CURVE]
-                                    })}
-                                >
-                                    Reset Curve
-                                </button>
                             </>
                         )}
 
                         {selectedEffect.type === 'blur' && (
-                            <label>
-                                Intensity: {selectedEffect.intensity || 5}px
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="20"
-                                    step="1"
-                                    value={selectedEffect.intensity || 5}
-                                    onChange={(e) => updateEffect(selectedEffect.id, {
-                                        intensity: parseInt(e.target.value)
-                                    })}
-                                />
-                            </label>
+                            <div className="setting-row">
+                                <label>Intensity</label>
+                                <div className="setting-control">
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="20"
+                                        step="1"
+                                        value={selectedEffect.intensity || 5}
+                                        onChange={(e) => updateEffect(selectedEffect.id, {
+                                            intensity: parseInt(e.target.value)
+                                        })}
+                                    />
+                                    <span className="setting-value">{selectedEffect.intensity || 5}px</span>
+                                </div>
+                            </div>
                         )}
 
                         {selectedEffect.type === 'slowmo' && (
-                            <label>
-                                Speed: {((selectedEffect.speed || 0.5) * 100).toFixed(0)}%
-                                <input
-                                    type="range"
-                                    min="0.1"
-                                    max="1"
-                                    step="0.1"
-                                    value={selectedEffect.speed || 0.5}
-                                    onChange={(e) => updateEffect(selectedEffect.id, {
-                                        speed: parseFloat(e.target.value)
-                                    })}
-                                />
-                            </label>
+                            <div className="setting-row">
+                                <label>Speed</label>
+                                <div className="setting-control">
+                                    <input
+                                        type="range"
+                                        min="0.1"
+                                        max="1"
+                                        step="0.1"
+                                        value={selectedEffect.speed || 0.5}
+                                        onChange={(e) => updateEffect(selectedEffect.id, {
+                                            speed: parseFloat(e.target.value)
+                                        })}
+                                    />
+                                    <span className="setting-value">{((selectedEffect.speed || 0.5) * 100).toFixed(0)}%</span>
+                                </div>
+                            </div>
                         )}
-
-                        <button
-                            className="effect-delete-text-btn"
-                            onClick={() => removeEffect(selectedEffect.id)}
-                        >
-                            Delete Effect
-                        </button>
+                    </div>
+                ) : (
+                    <div className="settings-section settings-empty">
+                        <span>Select an effect to edit</span>
                     </div>
                 )}
 
+                <div className="sidebar-divider" />
+
                 {/* Trim Info */}
-                <div className="trim-info">
-                    <span>Trim: {formatTimeDetailed(trimStart)} - {formatTimeDetailed(trimEnd)}</span>
-                    <span className="trim-duration">
-                        Duration: {formatTimeDetailed(trimEnd - trimStart)}
-                    </span>
-                </div>
-
-                {/* Controls */}
-                <div className="editor-controls">
-                    <button className="control-btn play-btn" onClick={togglePlay}>
-                        {isPlaying ? (
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <rect x="6" y="4" width="4" height="16" />
-                                <rect x="14" y="4" width="4" height="16" />
-                            </svg>
-                        ) : (
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <polygon points="5,3 19,12 5,21" />
-                            </svg>
-                        )}
-                    </button>
-
-                    <div className="export-controls">
-                        <button
-                            className="secondary-btn"
-                            onClick={handleSaveOriginal}
-                            disabled={isExporting}
-                        >
-                            Keep Original
-                        </button>
-                        <button
-                            className="primary-btn"
-                            onClick={handleExport}
-                            disabled={isExporting}
-                        >
-                            {isExporting ? exportStatus : "Export"}
-                        </button>
+                <div className="trim-info-sidebar">
+                    <h3 className="settings-title">Trim</h3>
+                    <div className="trim-values">
+                        <span>{formatTimeDetailed(trimStart)} - {formatTimeDetailed(trimEnd)}</span>
+                        <span className="trim-duration">{formatTimeDetailed(trimEnd - trimStart)}</span>
                     </div>
                 </div>
             </div>
