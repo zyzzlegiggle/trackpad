@@ -15,7 +15,7 @@ import { Toolbar } from "./components/editor/Toolbar";
 import { Timeline } from "./components/editor/Timeline";
 import { Sidebar } from "./components/editor/Sidebar";
 
-function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps) {
+function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [] }: VideoEditorProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const timelineRef = useRef<HTMLDivElement>(null);
     const tracksContainerRef = useRef<HTMLDivElement>(null);
@@ -189,41 +189,56 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
         const zoomDuration = EFFECT_CONFIG.zoom.defaultDuration;
         const generatedEffects: Effect[] = [];
 
-        clickEvents
+        // Filter and deduplicate click events
+        // Principle: Remove clicks that are too close in time (duplicate protection)
+        const MIN_CLICK_GAP_MS = 300; // Minimum gap between distinct double-clicks
+
+        const doubleClicks = clickEvents
             .filter(click => click.is_double_click)
-            .forEach((click, index) => {
-                const startTime = click.timestamp_ms / 1000;
-                const endTime = startTime + zoomDuration;
+            .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
 
-                let adjustedStart = startTime;
+        // Deduplicate: keep only clicks that are MIN_CLICK_GAP_MS apart
+        const deduplicatedClicks = doubleClicks.filter((click, index) => {
+            if (index === 0) return true;
+            const prevClick = doubleClicks[index - 1];
+            return click.timestamp_ms - prevClick.timestamp_ms >= MIN_CLICK_GAP_MS;
+        });
 
-                const hasOverlap = generatedEffects.some(e =>
-                    rangesOverlap(startTime, endTime, e.startTime, e.endTime)
-                );
+        console.log(`Click events: ${clickEvents.length} total, ${doubleClicks.length} double-clicks, ${deduplicatedClicks.length} after deduplication`);
 
-                if (hasOverlap) {
-                    const lastOverlapping = [...generatedEffects]
-                        .filter(e => rangesOverlap(startTime, endTime, e.startTime, e.endTime))
-                        .sort((a, b) => b.endTime - a.endTime)[0];
-                    if (lastOverlapping) {
-                        adjustedStart = lastOverlapping.endTime;
-                    }
+        deduplicatedClicks.forEach((click, index) => {
+            const startTime = click.timestamp_ms / 1000;
+            const endTime = startTime + zoomDuration;
+
+            let adjustedStart = startTime;
+
+            const hasOverlap = generatedEffects.some(e =>
+                rangesOverlap(startTime, endTime, e.startTime, e.endTime)
+            );
+
+            if (hasOverlap) {
+                const lastOverlapping = [...generatedEffects]
+                    .filter(e => rangesOverlap(startTime, endTime, e.startTime, e.endTime))
+                    .sort((a, b) => b.endTime - a.endTime)[0];
+                if (lastOverlapping) {
+                    adjustedStart = lastOverlapping.endTime;
                 }
+            }
 
-                const effect: Effect = {
-                    id: `zoom-auto-${index}-${Date.now()}`,
-                    type: 'zoom',
-                    startTime: adjustedStart,
-                    endTime: adjustedStart + zoomDuration,
-                    lane: 0,
-                    scale: 1.5,
-                    targetX: click.x,
-                    targetY: click.y,
-                    easingCurve: [...DEFAULT_EASING_CURVE],
-                };
+            const effect: Effect = {
+                id: `zoom-auto-${index}-${Date.now()}`,
+                type: 'zoom',
+                startTime: adjustedStart,
+                endTime: adjustedStart + zoomDuration,
+                lane: 0,
+                scale: 1.5,
+                targetX: click.x,
+                targetY: click.y,
+                easingCurve: [...DEFAULT_EASING_CURVE],
+            };
 
-                generatedEffects.push(effect);
-            });
+            generatedEffects.push(effect);
+        });
 
         if (generatedEffects.length > 0) {
             console.log("Auto-generated zoom effects from double-clicks:", generatedEffects);
@@ -490,6 +505,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
                     activeEffects={activeEffects}
                     currentTime={currentTime}
                     duration={duration}
+                    cursorPositions={cursorPositions}
                     onTogglePlay={togglePlay}
                     formatTimeDetailed={formatTimeDetailed}
                 />

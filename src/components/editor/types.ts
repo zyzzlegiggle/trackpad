@@ -6,10 +6,18 @@ export interface ClickEvent {
     is_double_click: boolean;
 }
 
+// Cursor position from recording (for cursor-following zoom)
+export interface CursorPosition {
+    timestamp_ms: number;
+    x: number;
+    y: number;
+}
+
 export interface VideoEditorProps {
     videoPath: string;
     onClose: () => void;
     clickEvents?: ClickEvent[];
+    cursorPositions?: CursorPosition[];
 }
 
 // Effect types

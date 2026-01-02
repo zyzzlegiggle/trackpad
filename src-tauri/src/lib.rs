@@ -83,6 +83,7 @@ pub fn run() {
             recorder::stop_recording,
             recorder::get_open_windows,
             recorder::get_recorded_clicks,
+            recorder::get_cursor_positions,
             trim_video,
             get_temp_video_path,
             move_video_to_videos,

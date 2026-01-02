@@ -28,11 +28,21 @@ pub struct ClickEvent {
     pub is_double_click: bool,  // True if this was a double-click
 }
 
-// Global storage for click events during recording
+// Cursor position captured during recording (for cursor-following zoom)
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct CursorPosition {
+    pub timestamp_ms: u64,      // Time since recording start
+    pub x: f64,                 // Normalized X (0.0 - 1.0)
+    pub y: f64,                 // Normalized Y (0.0 - 1.0)
+}
+
+// Global storage for events during recording
 lazy_static::lazy_static! {
     static ref CLICK_EVENTS: Mutex<Vec<ClickEvent>> = Mutex::new(Vec::new());
+    static ref CURSOR_POSITIONS: Mutex<Vec<CursorPosition>> = Mutex::new(Vec::new());
     static ref RECORDING_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
     static ref LAST_CLICK: Mutex<Option<(Instant, f64, f64)>> = Mutex::new(None);
+    static ref LAST_CURSOR_SAMPLE: Mutex<Option<Instant>> = Mutex::new(None);
     static ref SCREEN_SIZE: Mutex<(u32, u32)> = Mutex::new((1920, 1080));
 }
 
@@ -244,7 +254,7 @@ fn spawn_mouse_listener(stop_signal: Arc<AtomicBool>) {
     });
 }
 
-// Better mouse listener that tracks position
+// Better mouse listener that tracks position and samples cursor during recording
 fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
     use rdev::{listen, Event, EventType, Button};
     
@@ -257,6 +267,41 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
             if let EventType::MouseMove { x, y } = event.event_type {
                 last_mouse_x = x;
                 last_mouse_y = y;
+                
+                // Sample cursor position every 50ms during recording (for cursor-following zoom)
+                if stop_signal.load(Ordering::Relaxed) {
+                    let now = Instant::now();
+                    let should_sample = {
+                        let mut last_sample = LAST_CURSOR_SAMPLE.lock().unwrap();
+                        match *last_sample {
+                            Some(last) if now.duration_since(last).as_millis() < 50 => false,
+                            _ => {
+                                *last_sample = Some(now);
+                                true
+                            }
+                        }
+                    };
+                    
+                    if should_sample {
+                        let (screen_w, screen_h) = *SCREEN_SIZE.lock().unwrap();
+                        let norm_x = last_mouse_x / screen_w as f64;
+                        let norm_y = last_mouse_y / screen_h as f64;
+                        
+                        let timestamp_ms = {
+                            if let Some(start) = *RECORDING_START_TIME.lock().unwrap() {
+                                now.duration_since(start).as_millis() as u64
+                            } else {
+                                0
+                            }
+                        };
+                        
+                        CURSOR_POSITIONS.lock().unwrap().push(CursorPosition {
+                            timestamp_ms,
+                            x: norm_x,
+                            y: norm_y,
+                        });
+                    }
+                }
                 return;
             }
             
@@ -330,9 +375,11 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
         return Err("Already recording".to_string());
     }
    
-    // Clear previous click events and initialize tracking
+    // Clear previous events and initialize tracking
     CLICK_EVENTS.lock().unwrap().clear();
+    CURSOR_POSITIONS.lock().unwrap().clear();
     *LAST_CLICK.lock().unwrap() = None;
+    *LAST_CURSOR_SAMPLE.lock().unwrap() = None;
     *RECORDING_START_TIME.lock().unwrap() = Some(Instant::now());
     
     // Get screen size for coordinate normalization
@@ -441,4 +488,12 @@ pub fn stop_recording(state: State<'_, RecorderState>) -> Result<(), String> {
 pub fn get_recorded_clicks() -> Vec<ClickEvent> {
     let events = CLICK_EVENTS.lock().unwrap();
     events.clone()
+}
+
+// Get recorded cursor positions (call after stopping recording)
+#[tauri::command]
+pub fn get_cursor_positions() -> Vec<CursorPosition> {
+    let positions = CURSOR_POSITIONS.lock().unwrap();
+    println!("Returning {} cursor positions", positions.len());
+    positions.clone()
 }

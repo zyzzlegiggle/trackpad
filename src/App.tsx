@@ -16,6 +16,13 @@ interface ClickEvent {
   is_double_click: boolean;
 }
 
+// Cursor position from backend
+interface CursorPosition {
+  timestamp_ms: number;
+  x: number;
+  y: number;
+}
+
 function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState("Ready");
@@ -28,6 +35,7 @@ function App() {
   const [editorMode, setEditorMode] = useState(false);
   const [lastRecordedFile, setLastRecordedFile] = useState("");
   const [recordedClicks, setRecordedClicks] = useState<ClickEvent[]>([]);
+  const [cursorPositions, setCursorPositions] = useState<CursorPosition[]>([]);
 
   // Preview state - uncomment to enable
   // const [livePreviewSrc, setLivePreviewSrc] = useState("");
@@ -113,6 +121,16 @@ function App() {
           setRecordedClicks([]);
         }
 
+        // Fetch recorded cursor positions
+        try {
+          const positions = await invoke<CursorPosition[]>("get_cursor_positions");
+          console.log("Recorded cursor positions:", positions.length);
+          setCursorPositions(positions);
+        } catch (e) {
+          console.error("Failed to get cursor positions:", e);
+          setCursorPositions([]);
+        }
+
         // Open editor with the recorded file
         setLastRecordedFile(filename);
         setEditorMode(true);
@@ -154,7 +172,7 @@ function App() {
 
   // Show editor if in editor mode
   if (editorMode && lastRecordedFile) {
-    return <VideoEditor videoPath={lastRecordedFile} onClose={handleEditorClose} clickEvents={recordedClicks} />;
+    return <VideoEditor videoPath={lastRecordedFile} onClose={handleEditorClose} clickEvents={recordedClicks} cursorPositions={cursorPositions} />;
   }
 
   return (
@@ -162,8 +180,8 @@ function App() {
       <div className="bg-white rounded-3xl shadow-lg p-10 flex flex-col items-center gap-7 border border-black/8">
         {/* Recording Indicator */}
         <div className={`w-36 h-36 rounded-full border-3 flex items-center justify-center transition-all duration-300 ${isRecording
-            ? "border-accent-red shadow-[0_0_0_8px_rgba(239,68,68,0.2)] animate-[ring-pulse_2s_ease-in-out_infinite]"
-            : "border-black/8"
+          ? "border-accent-red shadow-[0_0_0_8px_rgba(239,68,68,0.2)] animate-[ring-pulse_2s_ease-in-out_infinite]"
+          : "border-black/8"
           }`}>
           <div className={`w-24 h-24 rounded-full flex items-center justify-center ${isRecording ? "bg-red-500/10" : "bg-gray-100"
             }`}>
@@ -205,8 +223,8 @@ function App() {
 
           <button
             className={`flex flex-col items-center gap-1.5 px-8 py-4 border-none rounded-xl cursor-pointer transition-all duration-200 ${isRecording
-                ? "bg-gray-800 border border-accent-red text-white hover:bg-gray-700"
-                : "bg-accent-red text-white hover:bg-red-500 hover:scale-102 active:scale-98"
+              ? "bg-gray-800 border border-accent-red text-white hover:bg-gray-700"
+              : "bg-accent-red text-white hover:bg-red-500 hover:scale-102 active:scale-98"
               }`}
             onClick={toggleRecording}
           >
@@ -253,8 +271,8 @@ function App() {
               <div className="flex flex-col gap-1">
                 <button
                   className={`flex items-center gap-3 px-3.5 py-3 border rounded-lg cursor-pointer text-left transition-all duration-200 w-full ${selectedTarget === "monitor"
-                      ? "bg-blue-500/10 border-accent-blue"
-                      : "bg-transparent border-transparent hover:bg-gray-100"
+                    ? "bg-blue-500/10 border-accent-blue"
+                    : "bg-transparent border-transparent hover:bg-gray-100"
                     }`}
                   onClick={() => selectSource("monitor", "Full Screen")}
                 >
@@ -272,8 +290,8 @@ function App() {
                   <button
                     key={w.id}
                     className={`flex items-center gap-3 px-3.5 py-3 border rounded-lg cursor-pointer text-left transition-all duration-200 w-full ${selectedTarget === w.id.toString()
-                        ? "bg-blue-500/10 border-accent-blue"
-                        : "bg-transparent border-transparent hover:bg-gray-100"
+                      ? "bg-blue-500/10 border-accent-blue"
+                      : "bg-transparent border-transparent hover:bg-gray-100"
                       }`}
                     onClick={() => selectSource(w.id.toString(), w.title)}
                   >
