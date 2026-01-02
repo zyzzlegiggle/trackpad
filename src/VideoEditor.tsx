@@ -54,20 +54,64 @@ function VideoEditor({ videoPath, onClose, clickEvents = [] }: VideoEditorProps)
     );
 
     // Find an available time slot in a given lane for an effect of given duration
+    // Principle: Place effect as close to the desired time as possible
     const findAvailableSlotInLane = (lane: number, desiredStart: number, effectDuration: number, excludeId?: string): number => {
         const laneEffects = effects
             .filter(e => e.id !== excludeId && e.lane === lane)
             .sort((a, b) => a.startTime - b.startTime);
 
-        if (laneEffects.length === 0) return desiredStart;
+        if (laneEffects.length === 0) return Math.max(0, desiredStart);
 
         const desiredEnd = desiredStart + effectDuration;
+
+        // Check if the desired position is free
         const hasOverlap = laneEffects.some(e =>
             rangesOverlap(desiredStart, desiredEnd, e.startTime, e.endTime)
         );
 
         if (!hasOverlap) return desiredStart;
 
+        // Find the overlapping effect to determine best placement
+        const overlappingEffect = laneEffects.find(e =>
+            rangesOverlap(desiredStart, desiredEnd, e.startTime, e.endTime)
+        );
+
+        if (!overlappingEffect) return desiredStart;
+
+        // Try placing immediately after the overlapping effect
+        const afterEnd = overlappingEffect.endTime;
+        const afterEndRange = { start: afterEnd, end: afterEnd + effectDuration };
+
+        // Check if placing after the overlapping effect causes another overlap
+        const hasOverlapAfter = laneEffects.some(e =>
+            e.id !== overlappingEffect.id &&
+            rangesOverlap(afterEndRange.start, afterEndRange.end, e.startTime, e.endTime)
+        );
+
+        if (!hasOverlapAfter) {
+            return afterEnd;
+        }
+
+        // Try placing immediately before the overlapping effect
+        const beforeStart = Math.max(0, overlappingEffect.startTime - effectDuration);
+        const hasOverlapBefore = laneEffects.some(e =>
+            e.id !== overlappingEffect.id &&
+            rangesOverlap(beforeStart, beforeStart + effectDuration, e.startTime, e.endTime)
+        );
+
+        if (!hasOverlapBefore && beforeStart >= 0) {
+            return beforeStart;
+        }
+
+        // Last resort: find the first gap in the timeline that fits
+        for (let i = 0; i < laneEffects.length - 1; i++) {
+            const gap = laneEffects[i + 1].startTime - laneEffects[i].endTime;
+            if (gap >= effectDuration) {
+                return laneEffects[i].endTime;
+            }
+        }
+
+        // No gap found, append after the last effect
         const lastEffect = laneEffects[laneEffects.length - 1];
         return lastEffect.endTime;
     };
