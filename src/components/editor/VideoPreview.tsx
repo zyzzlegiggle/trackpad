@@ -1,5 +1,5 @@
-import { RefObject, useMemo, useRef } from 'react';
-import { Effect, CursorPosition } from './types';
+import { RefObject, useMemo, useRef, useState, useEffect } from 'react';
+import { Effect, CursorPosition, ClickEvent } from './types';
 
 interface VideoPreviewProps {
     videoUrl: string;
@@ -11,6 +11,7 @@ interface VideoPreviewProps {
     currentTime: number;
     duration: number;
     cursorPositions: CursorPosition[];
+    clickEvents?: ClickEvent[];
     backgroundColor: string;
     onTogglePlay: () => void;
     formatTimeDetailed: (seconds: number) => string;
@@ -89,12 +90,36 @@ export function VideoPreview({
     currentTime,
     duration,
     cursorPositions,
+    clickEvents = [],
     backgroundColor,
     onTogglePlay,
     formatTimeDetailed,
 }: VideoPreviewProps) {
     // Cache for cursor position lookup (sequential access optimization)
     const cursorIndexRef = useRef(0);
+
+    // Click indicator state
+    const [activeClick, setActiveClick] = useState<{ x: number; y: number; id: number } | null>(null);
+
+    // Check for clicks at current time and show ripple
+    useEffect(() => {
+        if (clickEvents.length === 0) return;
+
+        const currentTimeMs = currentTime * 1000;
+        const CLICK_DISPLAY_DURATION = 500; // Show click for 500ms
+
+        // Find if there's a click that should be displayed
+        const recentClick = clickEvents.find(click => {
+            const timeSinceClick = currentTimeMs - click.timestamp_ms;
+            return timeSinceClick >= 0 && timeSinceClick < CLICK_DISPLAY_DURATION;
+        });
+
+        if (recentClick) {
+            setActiveClick({ x: recentClick.x, y: recentClick.y, id: recentClick.timestamp_ms });
+        } else {
+            setActiveClick(null);
+        }
+    }, [currentTime, clickEvents]);
 
     // Check if there's an active zoom effect first (early bailout)
     const zoomEffect = useMemo(
@@ -111,9 +136,9 @@ export function VideoPreview({
             };
         }
 
-        // Constants
-        const ZOOM_SCALE = 1.5;
-        const ZOOM_TRANSITION_TIME = 0.6;
+        // Constants - increased zoom for better focus
+        const ZOOM_SCALE = 2.0;  // Increased from 1.5 for tighter focus
+        const ZOOM_TRANSITION_TIME = 0.4;  // Faster transition for snappier feel
 
         const timeInEffect = currentTime - zoomEffect.startTime;
         const timeToEnd = zoomEffect.endTime - currentTime;
@@ -209,13 +234,44 @@ export function VideoPreview({
                         padding: '15%',
                     }}
                 >
-                    <video
-                        ref={videoRef}
-                        src={videoUrl}
-                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-                        onClick={onTogglePlay}
-                        style={{ display: videoError ? 'none' : 'block' }}
-                    />
+                    <div className="relative">
+                        <video
+                            ref={videoRef}
+                            src={videoUrl}
+                            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                            onClick={onTogglePlay}
+                            style={{ display: videoError ? 'none' : 'block' }}
+                        />
+                        {/* Click ripple indicator */}
+                        {activeClick && (
+                            <div
+                                key={activeClick.id}
+                                className="absolute pointer-events-none"
+                                style={{
+                                    left: `${activeClick.x * 100}%`,
+                                    top: `${activeClick.y * 100}%`,
+                                    transform: 'translate(-50%, -50%)',
+                                }}
+                            >
+                                {/* Outer ring - expands */}
+                                <div
+                                    className="absolute w-12 h-12 rounded-full border-2 border-white/80"
+                                    style={{
+                                        transform: 'translate(-50%, -50%)',
+                                        animation: 'click-ripple 0.5s ease-out forwards',
+                                    }}
+                                />
+                                {/* Inner dot */}
+                                <div
+                                    className="absolute w-3 h-3 rounded-full bg-white/90 shadow-lg"
+                                    style={{
+                                        transform: 'translate(-50%, -50%)',
+                                        animation: 'click-dot 0.5s ease-out forwards',
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>

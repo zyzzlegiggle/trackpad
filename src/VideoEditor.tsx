@@ -289,7 +289,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         };
 
         if (type === 'zoom') {
-            newEffect.scale = 1.5;
+            newEffect.scale = 2.0;  // Increased from 1.5 for tighter focus
             newEffect.targetX = 0.5;
             newEffect.targetY = 0.5;
         } else if (type === 'blur') {
@@ -540,6 +540,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     currentTime={currentTime}
                     duration={duration}
                     cursorPositions={cursorPositions}
+                    clickEvents={clickEvents}
                     backgroundColor={backgroundColor}
                     onTogglePlay={togglePlay}
                     formatTimeDetailed={formatTimeDetailed}
