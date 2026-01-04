@@ -147,54 +147,45 @@ async fn export_with_effects(
         
         println!("Processing effect: relative time {:.2}-{:.2}, scale={:.2}", s, e, scale);
         
-        // Calculate static pan offset based on target (for debugging)
-        // This shifts the crop position based on where the zoom should focus
+        // Calculate static pan offset based on target
         let pan_x = (tx - 0.5) * 2.0;  // -1 to 1
         let pan_y = (ty - 0.5) * 2.0;
         
         // Build a filter with time-based expressions
-        // FFmpeg filter escaping: commas in expressions need to be escaped with backslash
-        // Using format: scale=w:h,crop=w:h:x:y
-        // The expressions use 't' for time in seconds
-        
-        // Zoom expression: zoom in from 1 to scale, hold, zoom out
-        // We need to escape commas for FFmpeg: \, instead of ,
+        // CRITICAL: scale filter needs eval=frame to use time variable 't'
+        // Zoom timeline: 1 -> scale over ease period, hold, scale -> 1
         let ease = 0.3;  // 300ms ease in/out
         let si = s + ease;
         let so = e - ease;
+        let delta = scale - 1.0;
         
-        // Build zoom expression parts separately for clarity
-        // if(lt(t,s), 1, if(lt(t,si), lerp_in, if(lt(t,so), scale, if(lt(t,e), lerp_out, 1))))
-        // In FFmpeg expressions, commas inside function calls need escaping with single backslash
+        // Zoom expression with proper syntax
+        // Using single quotes for the entire expression to avoid shell escaping issues
         let zoom_expr = format!(
-            "if(lt(t\\,{s})\\,1\\,if(lt(t\\,{si})\\,1+{delta}*(t-{s})/{ease}\\,if(lt(t\\,{so})\\,{scale}\\,if(lt(t\\,{e})\\,{scale}-{delta}*(t-{so})/{ease}\\,1))))",
+            "if(lt(t,{s}),1,if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{scale},if(lt(t,{e}),{scale}-{delta}*(t-{so})/{ease},1))))",
             s = s,
             si = si,
             so = so,
             e = e,
             scale = scale,
-            delta = scale - 1.0,
+            delta = delta,
             ease = ease
         );
         
         // Pan expressions: only shift during effect
         let x_expr = format!(
-            "if(between(t\\,{s}\\,{e})\\,{off}\\,0)",
+            "if(between(t,{s},{e}),{off},0)",
             s = s, e = e, off = pan_x
         );
         let y_expr = format!(
-            "if(between(t\\,{s}\\,{e})\\,{off}\\,0)",
+            "if(between(t,{s},{e}),{off},0)",
             s = s, e = e, off = pan_y
         );
         
-        // Full filter: scale then crop
-        // Scale: multiply by zoom expression
-        // Crop: position based on pan expression
-        // crop x = (scaled_width - output_width) / 2 * (1 + pan_offset)
-        //        = (iw - w) / 2 * (1 + pan_offset)   -- after scale, iw is the scaled width
-        // Note: comma between filters also needs escaping when in -vf
+        // Full filter: scale (with eval=frame for time-based) then crop
+        // eval=frame is REQUIRED to use 't' variable in scale filter
         let filter = format!(
-            "scale=w=iw*({z}):h=ih*({z}):flags=lanczos,crop=w={w}:h={h}:x=(iw-{w})/2*(1+({x})):y=(ih-{h})/2*(1+({y}))",
+            "scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,crop=w={w}:h={h}:x='(iw-{w})/2*(1+({x}))':y='(ih-{h})/2*(1+({y}))'",
             z = zoom_expr,
             w = width,
             h = height,

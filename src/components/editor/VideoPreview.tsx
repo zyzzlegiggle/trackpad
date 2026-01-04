@@ -101,11 +101,11 @@ export function VideoPreview({
     );
 
     const zoomStyle = useMemo(() => {
-        // No zoom effect - return static style
+        // No zoom effect - use CSS transition for smooth return to normal
         if (!zoomEffect) {
             return {
                 transform: 'scale(1) translate(0%, 0%)',
-                transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+                transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
             };
         }
 
@@ -146,7 +146,7 @@ export function VideoPreview({
             }
         }
 
-        // Calculate zoom intensity with smoothstep
+        // Calculate zoom intensity with smoothstep (handles smooth animation mathematically)
         let zoomIntensity: number;
         if (timeInEffect < ZOOM_TRANSITION_TIME) {
             const t = timeInEffect / ZOOM_TRANSITION_TIME;
@@ -162,11 +162,11 @@ export function VideoPreview({
         const translateX = (0.5 - viewportCenterX) * (currentScale - 1) * 100;
         const translateY = (0.5 - viewportCenterY) * (currentScale - 1) * 100;
 
-        const isTransitioning = timeInEffect < ZOOM_TRANSITION_TIME || timeToEnd < ZOOM_TRANSITION_TIME;
-
+        // CRITICAL: No CSS transition during active zoom - smoothstep handles smoothness
+        // CSS transitions fight against rapid time updates causing lag
         return {
             transform: `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`,
-            transition: `transform ${isTransitioning ? 0.15 : 0.3}s cubic-bezier(0.4, 0, 0.2, 1)`,
+            // No transition - direct updates are smoother during playback
         };
     }, [zoomEffect, currentTime, cursorPositions]);
 
