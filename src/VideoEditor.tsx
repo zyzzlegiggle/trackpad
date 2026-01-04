@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import {
     VideoEditorProps,
@@ -47,9 +47,10 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
     const maxEffectEnd = effects.length > 0 ? Math.max(...effects.map(e => e.endTime)) : 0;
     const timelineDuration = Math.max(duration, maxEffectEnd);
 
-    // Get active effects at current playhead
-    const activeEffects = effects.filter(
-        e => currentTime >= e.startTime && currentTime <= e.endTime
+    // Get active effects at current playhead - memoized to prevent recalculation
+    const activeEffects = useMemo(() =>
+        effects.filter(e => currentTime >= e.startTime && currentTime <= e.endTime),
+        [effects, currentTime]
     );
 
     // Find an available time slot in a given lane for an effect of given duration
@@ -157,7 +158,15 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         };
 
         const handleTimeUpdate = () => {
-            setCurrentTime(video.currentTime);
+            // Throttle updates to reduce re-renders
+            const newTime = video.currentTime;
+            setCurrentTime(prev => {
+                // Only update if change is significant (>16ms worth)
+                if (Math.abs(newTime - prev) > 0.016) {
+                    return newTime;
+                }
+                return prev;
+            });
             if (video.currentTime >= trimEnd) {
                 video.pause();
                 setIsPlaying(false);

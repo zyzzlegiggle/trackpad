@@ -1,4 +1,4 @@
-import { RefObject, useMemo } from 'react';
+import { RefObject, useMemo, useRef } from 'react';
 import { Effect, CursorPosition } from './types';
 
 interface VideoPreviewProps {
@@ -15,26 +15,47 @@ interface VideoPreviewProps {
     formatTimeDetailed: (seconds: number) => string;
 }
 
-// Helper: Find cursor position at a given time (interpolated)
-// Optimized with binary search for O(log n) performance
-function getCursorAtTime(positions: CursorPosition[], timeMs: number): { x: number; y: number } | null {
-    if (positions.length === 0) return null;
+// Binary search with cached last index for sequential access optimization
+function getCursorAtTime(
+    positions: CursorPosition[],
+    timeMs: number,
+    lastIndexRef: { current: number }
+): { x: number; y: number } | null {
+    const len = positions.length;
+    if (len === 0) return null;
 
-    // Binary search to find the position just before or at timeMs
-    let left = 0;
-    let right = positions.length - 1;
+    // Check if last index is still valid (sequential playback optimization)
+    const lastIdx = lastIndexRef.current;
+    if (lastIdx >= 0 && lastIdx < len - 1) {
+        const before = positions[lastIdx];
+        const after = positions[lastIdx + 1];
+        if (before.timestamp_ms <= timeMs && timeMs <= after.timestamp_ms) {
+            // Cache hit - interpolate directly
+            const range = after.timestamp_ms - before.timestamp_ms;
+            if (range === 0) return { x: before.x, y: before.y };
+            const t = (timeMs - before.timestamp_ms) / range;
+            return {
+                x: before.x + (after.x - before.x) * t,
+                y: before.y + (after.y - before.y) * t,
+            };
+        }
+    }
 
-    // Handle edge cases
+    // Edge cases
     if (timeMs <= positions[0].timestamp_ms) {
+        lastIndexRef.current = 0;
         return { x: positions[0].x, y: positions[0].y };
     }
-    if (timeMs >= positions[right].timestamp_ms) {
-        return { x: positions[right].x, y: positions[right].y };
+    if (timeMs >= positions[len - 1].timestamp_ms) {
+        lastIndexRef.current = len - 2;
+        return { x: positions[len - 1].x, y: positions[len - 1].y };
     }
 
-    // Binary search for the interval containing timeMs
+    // Binary search
+    let left = 0;
+    let right = len - 1;
     while (left < right - 1) {
-        const mid = Math.floor((left + right) / 2);
+        const mid = (left + right) >> 1; // Faster than Math.floor
         if (positions[mid].timestamp_ms <= timeMs) {
             left = mid;
         } else {
@@ -42,10 +63,10 @@ function getCursorAtTime(positions: CursorPosition[], timeMs: number): { x: numb
         }
     }
 
+    lastIndexRef.current = left;
     const before = positions[left];
     const after = positions[right];
 
-    // Interpolate between before and after
     const range = after.timestamp_ms - before.timestamp_ms;
     if (range === 0) return { x: before.x, y: before.y };
 
@@ -70,113 +91,84 @@ export function VideoPreview({
     onTogglePlay,
     formatTimeDetailed,
 }: VideoPreviewProps) {
-    // First Principles Cursor-Following Zoom:
-    // 1. Smooth zoom in to the initial target position (not too close - 1.5x)
-    // 2. Only pan when cursor moves OUTSIDE visible zoomed area
-    // 3. Smooth zoom out at end of effect
+    // Cache for cursor position lookup (sequential access optimization)
+    const cursorIndexRef = useRef(0);
+
+    // Check if there's an active zoom effect first (early bailout)
+    const zoomEffect = useMemo(
+        () => activeEffects.find(e => e.type === 'zoom'),
+        [activeEffects]
+    );
 
     const zoomStyle = useMemo(() => {
-        const zoomEffect = activeEffects.find(e => e.type === 'zoom');
-
-        // Base style with GPU optimization
-        const baseStyle: React.CSSProperties = {
-            willChange: 'transform',
-            transformOrigin: 'center center',
-        };
-
+        // No zoom effect - return static style
         if (!zoomEffect) {
             return {
-                ...baseStyle,
                 transform: 'scale(1) translate(0%, 0%)',
                 transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
             };
         }
 
-        // Fixed moderate zoom level (first principle: not too close)
+        // Constants
         const ZOOM_SCALE = 1.5;
-        const ZOOM_TRANSITION_TIME = 0.6; // seconds for smooth in/out
+        const ZOOM_TRANSITION_TIME = 0.6;
 
         const timeInEffect = currentTime - zoomEffect.startTime;
         const timeToEnd = zoomEffect.endTime - currentTime;
 
-        // Initial target from the effect (where the click happened)
-        const initialTargetX = zoomEffect.targetX ?? 0.5;
-        const initialTargetY = zoomEffect.targetY ?? 0.5;
+        // Initial target
+        let viewportCenterX = zoomEffect.targetX ?? 0.5;
+        let viewportCenterY = zoomEffect.targetY ?? 0.5;
 
-        // Start with initial target
-        let viewportCenterX = initialTargetX;
-        let viewportCenterY = initialTargetY;
+        // Only do cursor lookup during hold phase
+        if (cursorPositions.length > 0 && timeInEffect > ZOOM_TRANSITION_TIME && timeToEnd > ZOOM_TRANSITION_TIME) {
+            const cursorPos = getCursorAtTime(cursorPositions, currentTime * 1000, cursorIndexRef);
 
-        // Get current cursor position
-        const currentTimeMs = currentTime * 1000;
-        const cursorPos = cursorPositions.length > 0
-            ? getCursorAtTime(cursorPositions, currentTimeMs)
-            : null;
+            if (cursorPos) {
+                const visibleRange = 1 / ZOOM_SCALE / 2;
+                const margin = visibleRange * 0.8;
 
-        // First principle: Only pan if cursor would be outside visible area
-        // At 1.5x zoom, visible area is 1/1.5 = 0.667 of the full frame
-        // So visible range from center is +/- 0.333
-        if (cursorPos && timeInEffect > ZOOM_TRANSITION_TIME && timeToEnd > ZOOM_TRANSITION_TIME) {
-            const visibleRange = 1 / ZOOM_SCALE / 2; // Half the visible area
-            const margin = visibleRange * 0.8; // Add 20% margin before panning
+                const cursorOffsetX = cursorPos.x - viewportCenterX;
+                const cursorOffsetY = cursorPos.y - viewportCenterY;
 
-            // Check if cursor is outside the visible boundary
-            const cursorOffsetX = cursorPos.x - viewportCenterX;
-            const cursorOffsetY = cursorPos.y - viewportCenterY;
+                if (Math.abs(cursorOffsetX) > margin) {
+                    viewportCenterX += cursorOffsetX > 0 ? cursorOffsetX - margin : cursorOffsetX + margin;
+                }
+                if (Math.abs(cursorOffsetY) > margin) {
+                    viewportCenterY += cursorOffsetY > 0 ? cursorOffsetY - margin : cursorOffsetY + margin;
+                }
 
-            // Only adjust if cursor would be clipped
-            if (Math.abs(cursorOffsetX) > margin) {
-                // Move viewport minimally to keep cursor visible with margin
-                const adjustment = cursorOffsetX > 0
-                    ? cursorOffsetX - margin
-                    : cursorOffsetX + margin;
-                viewportCenterX += adjustment;
+                // Clamp
+                const minCenter = 1 / ZOOM_SCALE / 2;
+                const maxCenter = 1 - minCenter;
+                viewportCenterX = Math.max(minCenter, Math.min(maxCenter, viewportCenterX));
+                viewportCenterY = Math.max(minCenter, Math.min(maxCenter, viewportCenterY));
             }
-            if (Math.abs(cursorOffsetY) > margin) {
-                const adjustment = cursorOffsetY > 0
-                    ? cursorOffsetY - margin
-                    : cursorOffsetY + margin;
-                viewportCenterY += adjustment;
-            }
-
-            // Clamp viewport center to valid range (prevent showing black edges)
-            const minCenter = 1 / ZOOM_SCALE / 2;
-            const maxCenter = 1 - minCenter;
-            viewportCenterX = Math.max(minCenter, Math.min(maxCenter, viewportCenterX));
-            viewportCenterY = Math.max(minCenter, Math.min(maxCenter, viewportCenterY));
         }
 
-        // Calculate zoom intensity with smooth ease-in and ease-out
+        // Calculate zoom intensity with smoothstep
         let zoomIntensity: number;
-
         if (timeInEffect < ZOOM_TRANSITION_TIME) {
-            // Zoom-in phase: smooth ease-in using cubic bezier approximation
             const t = timeInEffect / ZOOM_TRANSITION_TIME;
-            zoomIntensity = t * t * (3 - 2 * t); // Smoothstep function
+            zoomIntensity = t * t * (3 - 2 * t);
         } else if (timeToEnd < ZOOM_TRANSITION_TIME) {
-            // Zoom-out phase: smooth ease-out
             const t = timeToEnd / ZOOM_TRANSITION_TIME;
-            zoomIntensity = t * t * (3 - 2 * t); // Smoothstep function
+            zoomIntensity = t * t * (3 - 2 * t);
         } else {
-            // Hold phase: fully zoomed
             zoomIntensity = 1;
         }
 
-        // Calculate final transform values
         const currentScale = 1 + (ZOOM_SCALE - 1) * zoomIntensity;
         const translateX = (0.5 - viewportCenterX) * (currentScale - 1) * 100;
         const translateY = (0.5 - viewportCenterY) * (currentScale - 1) * 100;
 
-        // Use longer transition during zoom in/out, shorter for panning
         const isTransitioning = timeInEffect < ZOOM_TRANSITION_TIME || timeToEnd < ZOOM_TRANSITION_TIME;
-        const transitionDuration = isTransitioning ? 0.15 : 0.3;
 
         return {
-            ...baseStyle,
-            transform: `scale(${currentScale.toFixed(4)}) translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`,
-            transition: `transform ${transitionDuration}s cubic-bezier(0.4, 0, 0.2, 1)`,
+            transform: `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`,
+            transition: `transform ${isTransitioning ? 0.15 : 0.3}s cubic-bezier(0.4, 0, 0.2, 1)`,
         };
-    }, [activeEffects, currentTime, cursorPositions]);
+    }, [zoomEffect, currentTime, cursorPositions]);
 
     // Memoize blur filter
     const videoFilter = useMemo(() => {
