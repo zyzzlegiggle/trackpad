@@ -1,4 +1,4 @@
-import { RefObject, useMemo, useRef, useState, useEffect } from 'react';
+import { RefObject, useMemo, useRef } from 'react';
 import { Effect, CursorPosition, ClickEvent } from './types';
 
 interface VideoPreviewProps {
@@ -98,12 +98,10 @@ export function VideoPreview({
     // Cache for cursor position lookup (sequential access optimization)
     const cursorIndexRef = useRef(0);
 
-    // Click indicator state
-    const [activeClick, setActiveClick] = useState<{ x: number; y: number; id: number } | null>(null);
-
-    // Check for clicks at current time and show ripple
-    useEffect(() => {
-        if (clickEvents.length === 0) return;
+    // Click indicator - computed directly, no state updates
+    // Using useMemo instead of useEffect/useState to avoid re-renders on every frame
+    const activeClick = useMemo(() => {
+        if (clickEvents.length === 0) return null;
 
         const currentTimeMs = currentTime * 1000;
         const CLICK_DISPLAY_DURATION = 500; // Show click for 500ms
@@ -115,10 +113,9 @@ export function VideoPreview({
         });
 
         if (recentClick) {
-            setActiveClick({ x: recentClick.x, y: recentClick.y, id: recentClick.timestamp_ms });
-        } else {
-            setActiveClick(null);
+            return { x: recentClick.x, y: recentClick.y, id: recentClick.timestamp_ms };
         }
+        return null;
     }, [currentTime, clickEvents]);
 
     // Check if there's an active zoom effect first (early bailout)
