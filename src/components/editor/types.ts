@@ -23,12 +23,6 @@ export interface VideoEditorProps {
 // Effect types
 export type EffectType = 'zoom' | 'blur' | 'slowmo';
 
-// Easing curve point for controlling zoom in/out intensity over time
-export interface EasingPoint {
-    t: number;     // Normalized time (0-1) within the effect
-    value: number; // Intensity (0-1), where 0=no effect, 1=full effect
-}
-
 // Unified effect interface with lane support
 export interface Effect {
     id: string;
@@ -42,8 +36,6 @@ export interface Effect {
     targetY?: number;
     intensity?: number;
     speed?: number;
-    // Easing curve for zoom effects
-    easingCurve?: EasingPoint[];
 }
 
 // Effect configuration type

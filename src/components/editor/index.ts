@@ -9,4 +9,3 @@ export { EffectSegment } from './EffectSegment';
 export { Toolbar } from './Toolbar';
 export { Sidebar } from './Sidebar';
 export { EffectSettings } from './EffectSettings';
-export { EasingCurveEditor } from './EasingCurveEditor';

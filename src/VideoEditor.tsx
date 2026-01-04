@@ -5,7 +5,6 @@ import {
     Effect,
     EffectType,
     EFFECT_CONFIG,
-    DEFAULT_EASING_CURVE,
     rangesOverlap,
     formatTimeDetailed,
     generateTimeMarkers,
@@ -234,7 +233,6 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 scale: 1.5,
                 targetX: click.x,
                 targetY: click.y,
-                easingCurve: [...DEFAULT_EASING_CURVE],
             };
 
             generatedEffects.push(effect);
@@ -282,7 +280,6 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
             newEffect.scale = 1.5;
             newEffect.targetX = 0.5;
             newEffect.targetY = 0.5;
-            newEffect.easingCurve = [...DEFAULT_EASING_CURVE];
         } else if (type === 'blur') {
             newEffect.intensity = 5;
         } else if (type === 'slowmo') {

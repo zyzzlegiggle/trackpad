@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Effect } from './types';
 import { formatTime } from './utils';
 import { TrimTrack } from './TrimTrack';
