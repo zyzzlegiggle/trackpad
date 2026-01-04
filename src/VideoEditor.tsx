@@ -424,12 +424,36 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
             const inputPath = videosDir;
             const outputPath = inputPath.replace(`temp_${finalName}`, finalName);
 
-            await invoke("trim_video", {
-                inputPath,
-                outputPath,
-                startTime: trimStart,
-                endTime: trimEnd,
-            });
+            // Get zoom effects to export
+            const zoomEffects = effects
+                .filter(e => e.type === 'zoom' && e.startTime >= trimStart && e.endTime <= trimEnd)
+                .map(e => ({
+                    start_time: e.startTime,
+                    end_time: e.endTime,
+                    scale: e.scale || 1.5,
+                    target_x: e.targetX || 0.5,
+                    target_y: e.targetY || 0.5,
+                }));
+
+            if (zoomEffects.length > 0) {
+                // Export with effects (slower, re-encodes)
+                setExportStatus("Applying effects...");
+                await invoke("export_with_effects", {
+                    inputPath,
+                    outputPath,
+                    trimStart,
+                    trimEnd,
+                    effects: zoomEffects,
+                });
+            } else {
+                // Fast export (no effects)
+                await invoke("trim_video", {
+                    inputPath,
+                    outputPath,
+                    startTime: trimStart,
+                    endTime: trimEnd,
+                });
+            }
 
             try {
                 await invoke("delete_temp_video", { tempPath: inputPath });

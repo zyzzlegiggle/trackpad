@@ -28,8 +28,8 @@ function App() {
   const [status, setStatus] = useState("Ready");
   const [filename, setFilename] = useState("");
   const [windows, setWindows] = useState<WindowInfo[]>([]);
-  const [selectedTarget, setSelectedTarget] = useState<string>("monitor");
-  const [selectedLabel, setSelectedLabel] = useState("Full Screen");
+  const [selectedTarget, setSelectedTarget] = useState<string>("");
+  const [selectedLabel, setSelectedLabel] = useState("Select App");
   const [showSourceModal, setShowSourceModal] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [editorMode, setEditorMode] = useState(false);
@@ -135,10 +135,12 @@ function App() {
         setLastRecordedFile(filename);
         setEditorMode(true);
       } else {
+        if (!selectedTarget) {
+          setStatus("Please select an app first");
+          return;
+        }
         setStatus("Starting...");
-        const target = selectedTarget !== "monitor"
-          ? { type: "window", id: parseInt(selectedTarget) }
-          : { type: "monitor", id: null };
+        const target = { type: "window", id: parseInt(selectedTarget) };
 
         await invoke("start_recording", { filename, fps: "60", target });
         setIsRecording(true);
@@ -269,23 +271,6 @@ function App() {
             </div>
             <div className="p-3 max-h-72 overflow-y-auto">
               <div className="flex flex-col gap-1">
-                <button
-                  className={`flex items-center gap-3 px-3.5 py-3 border rounded-lg cursor-pointer text-left transition-all duration-200 w-full ${selectedTarget === "monitor"
-                    ? "bg-blue-500/10 border-accent-blue"
-                    : "bg-transparent border-transparent hover:bg-gray-100"
-                    }`}
-                  onClick={() => selectSource("monitor", "Full Screen")}
-                >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${selectedTarget === "monitor" ? "bg-blue-500/15 text-accent-blue" : "bg-gray-100 text-gray-600"
-                    }`}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
-                      <rect x="2" y="3" width="20" height="14" rx="2" />
-                      <line x1="8" y1="21" x2="16" y2="21" />
-                      <line x1="12" y1="17" x2="12" y2="21" />
-                    </svg>
-                  </div>
-                  <span className="flex-1 text-sm font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis">Full Screen</span>
-                </button>
                 {windows.map((w) => (
                   <button
                     key={w.id}
