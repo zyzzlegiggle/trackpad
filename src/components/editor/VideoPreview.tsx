@@ -16,26 +16,34 @@ interface VideoPreviewProps {
 }
 
 // Helper: Find cursor position at a given time (interpolated)
+// Optimized with binary search for O(log n) performance
 function getCursorAtTime(positions: CursorPosition[], timeMs: number): { x: number; y: number } | null {
     if (positions.length === 0) return null;
 
-    // Find surrounding positions
-    let before: CursorPosition | null = null;
-    let after: CursorPosition | null = null;
+    // Binary search to find the position just before or at timeMs
+    let left = 0;
+    let right = positions.length - 1;
 
-    for (let i = 0; i < positions.length; i++) {
-        if (positions[i].timestamp_ms <= timeMs) {
-            before = positions[i];
-        }
-        if (positions[i].timestamp_ms >= timeMs && !after) {
-            after = positions[i];
-            break;
+    // Handle edge cases
+    if (timeMs <= positions[0].timestamp_ms) {
+        return { x: positions[0].x, y: positions[0].y };
+    }
+    if (timeMs >= positions[right].timestamp_ms) {
+        return { x: positions[right].x, y: positions[right].y };
+    }
+
+    // Binary search for the interval containing timeMs
+    while (left < right - 1) {
+        const mid = Math.floor((left + right) / 2);
+        if (positions[mid].timestamp_ms <= timeMs) {
+            left = mid;
+        } else {
+            right = mid;
         }
     }
 
-    if (!before && !after) return null;
-    if (!before) return after ? { x: after.x, y: after.y } : null;
-    if (!after) return { x: before.x, y: before.y };
+    const before = positions[left];
+    const after = positions[right];
 
     // Interpolate between before and after
     const range = after.timestamp_ms - before.timestamp_ms;
