@@ -44,6 +44,10 @@ lazy_static::lazy_static! {
     static ref LAST_CLICK: Mutex<Option<(Instant, f64, f64)>> = Mutex::new(None);
     static ref LAST_CURSOR_SAMPLE: Mutex<Option<Instant>> = Mutex::new(None);
     static ref SCREEN_SIZE: Mutex<(u32, u32)> = Mutex::new((1920, 1080));
+    // Capture target bounds: (x, y, width, height) - for coordinate transformation
+    // Screen capture: (0, 0, screen_w, screen_h)
+    // Window capture: (window_left, window_top, window_w, window_h)
+    static ref CAPTURE_BOUNDS: Mutex<(i32, i32, u32, u32)> = Mutex::new((0, 0, 1920, 1080));
 }
 
 pub struct RecorderState {
@@ -283,23 +287,29 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                     };
                     
                     if should_sample {
-                        let (screen_w, screen_h) = *SCREEN_SIZE.lock().unwrap();
-                        let norm_x = last_mouse_x / screen_w as f64;
-                        let norm_y = last_mouse_y / screen_h as f64;
+                        // Transform screen coordinates to capture-relative coordinates
+                        let (cap_x, cap_y, cap_w, cap_h) = *CAPTURE_BOUNDS.lock().unwrap();
+                        let rel_x = last_mouse_x - cap_x as f64;
+                        let rel_y = last_mouse_y - cap_y as f64;
+                        let norm_x = rel_x / cap_w as f64;
+                        let norm_y = rel_y / cap_h as f64;
                         
-                        let timestamp_ms = {
-                            if let Some(start) = *RECORDING_START_TIME.lock().unwrap() {
-                                now.duration_since(start).as_millis() as u64
-                            } else {
-                                0
-                            }
-                        };
-                        
-                        CURSOR_POSITIONS.lock().unwrap().push(CursorPosition {
-                            timestamp_ms,
-                            x: norm_x,
-                            y: norm_y,
-                        });
+                        // Only record if cursor is within capture bounds
+                        if norm_x >= 0.0 && norm_x <= 1.0 && norm_y >= 0.0 && norm_y <= 1.0 {
+                            let timestamp_ms = {
+                                if let Some(start) = *RECORDING_START_TIME.lock().unwrap() {
+                                    now.duration_since(start).as_millis() as u64
+                                } else {
+                                    0
+                                }
+                            };
+                            
+                            CURSOR_POSITIONS.lock().unwrap().push(CursorPosition {
+                                timestamp_ms,
+                                x: norm_x,
+                                y: norm_y,
+                            });
+                        }
                     }
                 }
                 return;
@@ -313,10 +323,17 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
             if let EventType::ButtonPress(Button::Left) = event.event_type {
                 let now = Instant::now();
                 
-                // Get screen size for normalization
-                let (screen_w, screen_h) = *SCREEN_SIZE.lock().unwrap();
-                let norm_x = last_mouse_x / screen_w as f64;
-                let norm_y = last_mouse_y / screen_h as f64;
+                // Transform screen coordinates to capture-relative coordinates
+                let (cap_x, cap_y, cap_w, cap_h) = *CAPTURE_BOUNDS.lock().unwrap();
+                let rel_x = last_mouse_x - cap_x as f64;
+                let rel_y = last_mouse_y - cap_y as f64;
+                let norm_x = rel_x / cap_w as f64;
+                let norm_y = rel_y / cap_h as f64;
+                
+                // Only process clicks within capture bounds
+                if norm_x < 0.0 || norm_x > 1.0 || norm_y < 0.0 || norm_y > 1.0 {
+                    return;
+                }
                 
                 // Get timestamp since recording start
                 let timestamp_ms = {
@@ -349,7 +366,7 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                         y: norm_y,
                         is_double_click: true,
                     };
-                    println!("Double-click captured at {:.2}, {:.2} @ {}ms", norm_x, norm_y, timestamp_ms);
+                    println!("Double-click captured at ({:.3}, {:.3}) in video coords @ {}ms", norm_x, norm_y, timestamp_ms);
                     CLICK_EVENTS.lock().unwrap().push(click_event);
                 }
             }
@@ -404,10 +421,15 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
                 
                 println!("Capturing window: {:?}", window.title());
                 
-                // Get window dimensions
+                // Get window dimensions and position
                 let rect = window.rect().map_err(|e| format!("Failed to get window rect: {:?}", e))?;
                 let width = (rect.right - rect.left) as u32;
                 let height = (rect.bottom - rect.top) as u32;
+                
+                // Set capture bounds for coordinate transformation
+                // Window position on screen + window dimensions
+                *CAPTURE_BOUNDS.lock().unwrap() = (rect.left, rect.top, width, height);
+                println!("Capture bounds set: ({}, {}, {}x{})", rect.left, rect.top, width, height);
                 
                 let flags = CaptureFlags {
                     filename,
@@ -435,6 +457,11 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
                 let primary_monitor = Monitor::primary().expect("No primary monitor");
                 let width = primary_monitor.width().expect("Failed to get monitor width");
                 let height = primary_monitor.height().expect("Failed to get monitor height");
+                
+                // Set capture bounds for coordinate transformation
+                // Full screen: origin at (0,0)
+                *CAPTURE_BOUNDS.lock().unwrap() = (0, 0, width, height);
+                println!("Capture bounds set: (0, 0, {}x{})", width, height);
                 
                 println!("Capturing primary monitor: {}x{}", width, height);
                    

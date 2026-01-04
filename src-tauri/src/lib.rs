@@ -139,16 +139,40 @@ async fn export_with_effects(
     if !effects.is_empty() {
         println!("Building filter for {} zoom effects", effects.len());
         
-        // Build expressions that handle ALL effects
-        // Each effect has: start_time, end_time, scale, target_x, target_y
-        // We need expressions that:
-        // 1. zoom_expr: returns the current zoom level based on time
-        // 2. x_expr, y_expr: returns the crop offset based on time and target
+        // === PADDED CANVAS APPROACH ===
+        // Like Cursorful/Screen Studio: add padding around video so edge zooms show 
+        // gradient background instead of black
+        //
+        // Pipeline: pad → scale → crop
+        // 1. pad: Add gradient background padding around video
+        // 2. scale: Zoom by scaling up the padded canvas
+        // 3. crop: Extract output viewport centered on target position
         
         let ease = 0.3; // 300ms ease in/out
         
-        // Build composite expressions for all effects
-        // Start with default values (no zoom, center position)
+        // Calculate padding needed for maximum zoom at edges
+        // At max_scale zoom, we need (max_scale - 1) * dimension / 2 padding on each side
+        let max_scale = effects.iter().map(|e| e.scale).fold(1.5_f64, f64::max);
+        let pad_x = ((width as f64 * (max_scale - 1.0) / 2.0).ceil() as i32).max(100);
+        let pad_y = ((height as f64 * (max_scale - 1.0) / 2.0).ceil() as i32).max(100);
+        
+        // Padded canvas dimensions
+        let padded_w = width as i32 + 2 * pad_x;
+        let padded_h = height as i32 + 2 * pad_y;
+        
+        println!("Padding: {}x{} -> {}x{} (pad: {}x{})", width, height, padded_w, padded_h, pad_x, pad_y);
+        println!("Max scale: {:.2}", max_scale);
+        
+        // Default crop position when no effect is active:
+        // Show the original video (which is centered in the padded canvas)
+        // When z=1, padded canvas size = padded_w, so crop should start at pad_x
+        // But since z varies, we need: pad_x * z = pad_x * iw / padded_w
+        let default_x_expr = format!("{}*iw/{}", pad_x, padded_w);
+        let default_y_expr = format!("{}*ih/{}", pad_y, padded_h);
+        
+        // Build effect expressions
+        // Each effect provides a complete expression that evaluates to the correct value
+        // when active, or to -1 when inactive (we'll use max to combine them)
         let mut zoom_parts: Vec<String> = Vec::new();
         let mut x_parts: Vec<String> = Vec::new();
         let mut y_parts: Vec<String> = Vec::new();
@@ -158,11 +182,12 @@ async fn export_with_effects(
             let s = eff.start_time - trim_start;
             let e = eff.end_time - trim_start;
             let scale = eff.scale;
-            let tx = eff.target_x;
+            let tx = eff.target_x;  // Normalized 0-1 in original video
             let ty = eff.target_y;
             
             // Skip effects outside the trimmed range
             if e < 0.0 || s > duration {
+                println!("  Skipping effect (outside trim range)");
                 continue;
             }
             
@@ -172,29 +197,41 @@ async fn export_with_effects(
             
             println!("Effect: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3})", s, e, scale, tx, ty);
             
-            // Zoom expression for this effect
-            // Returns zoom level when inside effect time range, otherwise continues to next check
+            // Target point in padded canvas (before scale):
+            //   target_x_padded = pad_x + tx * width
+            // After scaling by z=iw/padded_w:
+            //   target_x_scaled = (pad_x + tx * width) * iw / padded_w
+            // Crop offset to center output on target:
+            //   crop_x = target_x_scaled - width/2
+            let target_x_padded = pad_x as f64 + tx * width as f64;
+            let target_y_padded = pad_y as f64 + ty * height as f64;
+            
+            println!("  Target in padded canvas: ({:.1}, {:.1})", target_x_padded, target_y_padded);
+            
+            // Zoom expression with smooth ease in/out
+            // Returns the actual zoom factor when active, 0 when inactive
             let zoom_expr = format!(
                 "if(between(t,{s},{e}),if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{scale},{scale}-{delta}*(t-{so})/{ease})),0)",
                 s = s, si = si, so = so, e = e, scale = scale, delta = delta, ease = ease
             );
             zoom_parts.push(zoom_expr);
             
-            // Position expressions for this effect
-            // target_x/y are normalized 0-1, need to convert to pixel offsets
-            // When zoomed at scale S, the visible area is (width/S, height/S)
-            // To center on target (tx, ty), we need to crop at:
-            //   crop_x = tx * width * S - width/2 = width * (tx * S - 0.5)
-            // But we're cropping AFTER scale, so iw = width * S
-            //   crop_x = tx * iw - width/2
-            let crop_x = format!(
-                "if(between(t,{s},{e}),{tx}*iw-{half_w},0)",
-                s = s, e = e, tx = tx, half_w = width as f64 / 2.0
+            // crop_x = target_x_padded * iw / padded_w - width/2
+            // Returns the actual crop position when active (guaranteed positive due to padding)
+            // When inactive, returns -1 (invalid, will be filtered by max)
+            let crop_x_formula = format!(
+                "{}*iw/{}-{}",
+                target_x_padded, padded_w, width as f64 / 2.0
             );
-            let crop_y = format!(
-                "if(between(t,{s},{e}),{ty}*ih-{half_h},0)",
-                s = s, e = e, ty = ty, half_h = height as f64 / 2.0
+            let crop_y_formula = format!(
+                "{}*ih/{}-{}",
+                target_y_padded, padded_h, height as f64 / 2.0
             );
+            
+            // Wrap in time check: return actual value when active, -1 when inactive
+            let crop_x = format!("if(between(t,{s},{e}),{formula},-1)", s = s, e = e, formula = crop_x_formula);
+            let crop_y = format!("if(between(t,{s},{e}),{formula},-1)", s = s, e = e, formula = crop_y_formula);
+            
             x_parts.push(crop_x);
             y_parts.push(crop_y);
         }
@@ -202,39 +239,57 @@ async fn export_with_effects(
         if zoom_parts.is_empty() {
             println!("No valid effects after filtering, skipping zoom filter");
         } else {
-            // Combine all zoom parts: take max (only one effect active at a time typically)
-            // Use nested if-else: check each effect in order
+            // Combine zoom expressions (sum them; each returns 0 when not active)
             let zoom_combined: String = if zoom_parts.len() == 1 {
                 format!("max(1,{})", zoom_parts[0])
             } else {
-                // Sum all zoom expressions (each returns 0 when not active) and take max with 1
                 let sum = zoom_parts.join("+");
                 format!("max(1,{})", sum)
             };
             
-            // Combine position parts similarly (sum, each returns 0 when not active)
-            let x_combined = if x_parts.len() == 1 {
+            // Combine position expressions using max
+            // Each returns -1 when inactive, valid positive value when active
+            // max of all: gives the active one's value, or -1 if none active
+            // Then use if to fall back to default when none active
+            let x_max = if x_parts.len() == 1 {
                 x_parts[0].clone()
             } else {
-                x_parts.join("+")
+                // Create nested max: max(a,max(b,max(c,...)))
+                let mut expr = x_parts[0].clone();
+                for part in x_parts.iter().skip(1) {
+                    expr = format!("max({},{})", expr, part);
+                }
+                expr
             };
             
-            let y_combined = if y_parts.len() == 1 {
+            let y_max = if y_parts.len() == 1 {
                 y_parts[0].clone()
             } else {
-                y_parts.join("+")
+                let mut expr = y_parts[0].clone();
+                for part in y_parts.iter().skip(1) {
+                    expr = format!("max({},{})", expr, part);
+                }
+                expr
             };
             
-            // Build the filter
-            // scale: multiply dimensions by zoom factor
-            // crop: extract original resolution centered on target position
+            // If max result is -1 (no effect active), use default position
+            let x_combined = format!("if(lt({x_max},0),{default},{x_max})", 
+                x_max = x_max, default = default_x_expr);
+            let y_combined = format!("if(lt({y_max},0),{default},{y_max})", 
+                y_max = y_max, default = default_y_expr);
+            
+            // Build the complete filter chain:
+            // 1. pad: Add gradient padding around video (dark blue)
+            // 2. scale: Zoom by scaling up
+            // 3. crop: Extract output size centered on target
             let filter = format!(
-                "scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,crop=w={w}:h={h}:x='max(0,min(iw-{w},{x}))':y='max(0,min(ih-{h},{y}))'",
+                "pad=w={pw}:h={ph}:x={px}:y={py}:color=0x1a1a2e,\
+                 scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,\
+                 crop=w={w}:h={h}:x='max(0,min(iw-{w},{x}))':y='max(0,min(ih-{h},{y}))'",
+                pw = padded_w, ph = padded_h, px = pad_x, py = pad_y,
                 z = zoom_combined,
-                w = width,
-                h = height,
-                x = x_combined,
-                y = y_combined
+                w = width, h = height,
+                x = x_combined, y = y_combined
             );
             
             println!("Filter: {}", filter);

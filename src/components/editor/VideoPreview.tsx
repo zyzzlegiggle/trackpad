@@ -190,14 +190,31 @@ export function VideoPreview({
             {!videoLoaded && !videoError && (
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400 text-sm z-10">Loading video...</div>
             )}
-            <div className="flex-1 flex items-center justify-center" style={{ ...zoomStyle, ...videoFilter }}>
-                <video
-                    ref={videoRef}
-                    src={videoUrl}
-                    className="max-w-full max-h-full object-contain"
-                    onClick={onTogglePlay}
-                    style={{ display: videoError ? 'none' : 'block' }}
-                />
+            {/* Padded canvas container - matches export behavior */}
+            {/* When zooming to edges, the gradient background shows instead of black */}
+            <div
+                className="flex-1 flex items-center justify-center"
+                style={{
+                    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+                }}
+            >
+                <div
+                    className="relative flex items-center justify-center"
+                    style={{
+                        ...zoomStyle,
+                        ...videoFilter,
+                        // Add padding around video for zoom at edges
+                        padding: '15%',
+                    }}
+                >
+                    <video
+                        ref={videoRef}
+                        src={videoUrl}
+                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                        onClick={onTogglePlay}
+                        style={{ display: videoError ? 'none' : 'block' }}
+                    />
+                </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>
                 {!isPlaying && videoLoaded && (
