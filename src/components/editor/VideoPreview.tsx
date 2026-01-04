@@ -11,6 +11,7 @@ interface VideoPreviewProps {
     currentTime: number;
     duration: number;
     cursorPositions: CursorPosition[];
+    backgroundColor: string;
     onTogglePlay: () => void;
     formatTimeDetailed: (seconds: number) => string;
 }
@@ -88,6 +89,7 @@ export function VideoPreview({
     currentTime,
     duration,
     cursorPositions,
+    backgroundColor,
     onTogglePlay,
     formatTimeDetailed,
 }: VideoPreviewProps) {
@@ -191,11 +193,11 @@ export function VideoPreview({
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400 text-sm z-10">Loading video...</div>
             )}
             {/* Padded canvas container - matches export behavior */}
-            {/* When zooming to edges, the gradient background shows instead of black */}
+            {/* When zooming to edges, the background color shows instead of black */}
             <div
                 className="flex-1 flex items-center justify-center"
                 style={{
-                    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+                    backgroundColor: backgroundColor,
                 }}
             >
                 <div

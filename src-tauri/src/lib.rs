@@ -89,16 +89,19 @@ async fn export_with_effects(
     trim_start: f64,
     trim_end: f64,
     effects: Vec<ZoomEffect>,
+    background_color: Option<String>,  // Hex color without # prefix
 ) -> Result<String, String> {
     let duration = trim_end - trim_start;
+    let bg_color = background_color.unwrap_or_else(|| "1a1a2e".to_string());
     
-    println!("=== EXPORT WITH EFFECTS ===");
+    println!("=== EXPORT WITH EFFECTS (Zoomed-Out Canvas) ===");
     println!("Input: {}", input_path);
     println!("Output: {}", output_path);
     println!("Trim: {:.2} - {:.2} (duration: {:.2})", trim_start, trim_end, duration);
+    println!("Background color: #{}", bg_color);
     println!("Effects received: {}", effects.len());
     for (i, eff) in effects.iter().enumerate() {
-        println!("  Effect {}: time={:.2}-{:.2}, scale={:.2}, target=({:.2},{:.2})", 
+        println!("  Effect {}: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3})", 
             i, eff.start_time, eff.end_time, eff.scale, eff.target_x, eff.target_y);
     }
     
@@ -136,43 +139,26 @@ async fn export_with_effects(
         "-t".to_string(), format!("{:.3}", duration),
     ];
     
+    // === ZOOMED-OUT CANVAS APPROACH ===
+    // Base state: Video scaled to 85% to show background padding
+    // Zoomed state: Video scaled to base_scale * zoom_factor
+    //
+    // This ensures:
+    // 1. Background is always visible in base state
+    // 2. Zoom effects work correctly by scaling video up
+    // 3. Edge zooms show background instead of black
+    
+    let base_scale = 0.85;  // Video at 85% size in base state
+    let margin = (1.0 - base_scale) / 2.0;  // 7.5% margin on each side
+    
+    println!("Base scale: {:.2}, Margin: {:.1}%", base_scale, margin * 100.0);
+    
     if !effects.is_empty() {
         println!("Building filter for {} zoom effects", effects.len());
         
-        // === PADDED CANVAS APPROACH ===
-        // Like Cursorful/Screen Studio: add padding around video so edge zooms show 
-        // gradient background instead of black
-        //
-        // Pipeline: pad → scale → crop
-        // 1. pad: Add gradient background padding around video
-        // 2. scale: Zoom by scaling up the padded canvas
-        // 3. crop: Extract output viewport centered on target position
-        
         let ease = 0.3; // 300ms ease in/out
         
-        // Calculate padding needed for maximum zoom at edges
-        // At max_scale zoom, we need (max_scale - 1) * dimension / 2 padding on each side
-        let max_scale = effects.iter().map(|e| e.scale).fold(1.5_f64, f64::max);
-        let pad_x = ((width as f64 * (max_scale - 1.0) / 2.0).ceil() as i32).max(100);
-        let pad_y = ((height as f64 * (max_scale - 1.0) / 2.0).ceil() as i32).max(100);
-        
-        // Padded canvas dimensions
-        let padded_w = width as i32 + 2 * pad_x;
-        let padded_h = height as i32 + 2 * pad_y;
-        
-        println!("Padding: {}x{} -> {}x{} (pad: {}x{})", width, height, padded_w, padded_h, pad_x, pad_y);
-        println!("Max scale: {:.2}", max_scale);
-        
-        // Default crop position when no effect is active:
-        // Show the original video (which is centered in the padded canvas)
-        // When z=1, padded canvas size = padded_w, so crop should start at pad_x
-        // But since z varies, we need: pad_x * z = pad_x * iw / padded_w
-        let default_x_expr = format!("{}*iw/{}", pad_x, padded_w);
-        let default_y_expr = format!("{}*ih/{}", pad_y, padded_h);
-        
-        // Build effect expressions
-        // Each effect provides a complete expression that evaluates to the correct value
-        // when active, or to -1 when inactive (we'll use max to combine them)
+        // Build zoom expressions
         let mut zoom_parts: Vec<String> = Vec::new();
         let mut x_parts: Vec<String> = Vec::new();
         let mut y_parts: Vec<String> = Vec::new();
@@ -181,8 +167,8 @@ async fn export_with_effects(
             // Adjust times relative to trim start
             let s = eff.start_time - trim_start;
             let e = eff.end_time - trim_start;
-            let scale = eff.scale;
-            let tx = eff.target_x;  // Normalized 0-1 in original video
+            let zoom_scale = eff.scale;  // This is the ADDITIONAL zoom (e.g., 1.5 means 1.5x)
+            let tx = eff.target_x;  // Normalized 0-1 in video
             let ty = eff.target_y;
             
             // Skip effects outside the trimmed range
@@ -193,110 +179,114 @@ async fn export_with_effects(
             
             let si = s + ease;
             let so = e - ease;
-            let delta = scale - 1.0;
             
-            println!("Effect: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3})", s, e, scale, tx, ty);
+            println!("Effect: time={:.2}-{:.2}, zoom={:.2}, target=({:.3},{:.3})", s, e, zoom_scale, tx, ty);
             
-            // Target point in padded canvas (before scale):
-            //   target_x_padded = pad_x + tx * width
-            // After scaling by z=iw/padded_w:
-            //   target_x_scaled = (pad_x + tx * width) * iw / padded_w
-            // Crop offset to center output on target:
-            //   crop_x = target_x_scaled - width/2
-            let target_x_padded = pad_x as f64 + tx * width as f64;
-            let target_y_padded = pad_y as f64 + ty * height as f64;
-            
-            println!("  Target in padded canvas: ({:.1}, {:.1})", target_x_padded, target_y_padded);
-            
-            // Zoom expression with smooth ease in/out
-            // Returns the actual zoom factor when active, 0 when inactive
+            // Zoom expression: returns current scale factor
+            // Base = 1.0, zoomed = zoom_scale
+            // Eased transition in and out
+            let delta = zoom_scale - 1.0;
             let zoom_expr = format!(
-                "if(between(t,{s},{e}),if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{scale},{scale}-{delta}*(t-{so})/{ease})),0)",
-                s = s, si = si, so = so, e = e, scale = scale, delta = delta, ease = ease
+                "if(between(t,{s},{e}),if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{zoom_scale},{zoom_scale}-{delta}*(t-{so})/{ease})),1)",
+                s = s, si = si, so = so, e = e, zoom_scale = zoom_scale, delta = delta, ease = ease
             );
-            zoom_parts.push(zoom_expr);
+            zoom_parts.push(format!("if(between(t,{},{}),{},0)", s, e, zoom_expr));
             
-            // crop_x = target_x_padded * iw / padded_w - width/2
-            // Returns the actual crop position when active (guaranteed positive due to padding)
-            // When inactive, returns -1 (invalid, will be filtered by max)
-            let crop_x_formula = format!(
-                "{}*iw/{}-{}",
-                target_x_padded, padded_w, width as f64 / 2.0
-            );
-            let crop_y_formula = format!(
-                "{}*ih/{}-{}",
-                target_y_padded, padded_h, height as f64 / 2.0
-            );
+            // Position expressions
+            // When zoomed, we need to offset the video to center the target point
+            // Target position in base-scaled video: tx * video_width_scaled = tx * width * base_scale * zoom
+            // To center this in output: offset = output_center - target_position
+            //                                  = width/2 - (margin * width + tx * width * base_scale) * zoom
+            // But it's simpler to think in terms of the video placement offset from center
             
-            // Wrap in time check: return actual value when active, -1 when inactive
-            let crop_x = format!("if(between(t,{s},{e}),{formula},-1)", s = s, e = e, formula = crop_x_formula);
-            let crop_y = format!("if(between(t,{s},{e}),{formula},-1)", s = s, e = e, formula = crop_y_formula);
+            // x_offset = (0.5 - (margin + tx * base_scale)) * width * (zoom - 1)
+            // When zoom=1: offset=0 (video centered)
+            // When zoom>1: offset shifts to center the target point
             
-            x_parts.push(crop_x);
-            y_parts.push(crop_y);
+            let target_in_canvas = margin + tx * base_scale;  // Where target is in normalized canvas coords
+            let y_target_in_canvas = margin + ty * base_scale;
+            
+            let x_offset_formula = format!("(0.5-{})*{}*(({zoom_expr})-1)", 
+                target_in_canvas, width,
+                zoom_expr = zoom_expr);
+            let y_offset_formula = format!("(0.5-{})*{}*(({zoom_expr})-1)", 
+                y_target_in_canvas, height,
+                zoom_expr = zoom_expr);
+            
+            x_parts.push(format!("if(between(t,{},{}),{},0)", s, e, x_offset_formula));
+            y_parts.push(format!("if(between(t,{},{}),{},0)", s, e, y_offset_formula));
         }
         
-        if zoom_parts.is_empty() {
-            println!("No valid effects after filtering, skipping zoom filter");
+        // Combine expressions
+        let zoom_combined = if zoom_parts.is_empty() {
+            "1".to_string()
+        } else if zoom_parts.len() == 1 {
+            format!("max(1,{})", zoom_parts[0])  
         } else {
-            // Combine zoom expressions (sum them; each returns 0 when not active)
-            let zoom_combined: String = if zoom_parts.len() == 1 {
-                format!("max(1,{})", zoom_parts[0])
-            } else {
-                let sum = zoom_parts.join("+");
-                format!("max(1,{})", sum)
-            };
-            
-            // Combine position expressions using max
-            // Each returns -1 when inactive, valid positive value when active
-            // max of all: gives the active one's value, or -1 if none active
-            // Then use if to fall back to default when none active
-            let x_max = if x_parts.len() == 1 {
-                x_parts[0].clone()
-            } else {
-                // Create nested max: max(a,max(b,max(c,...)))
-                let mut expr = x_parts[0].clone();
-                for part in x_parts.iter().skip(1) {
-                    expr = format!("max({},{})", expr, part);
-                }
-                expr
-            };
-            
-            let y_max = if y_parts.len() == 1 {
-                y_parts[0].clone()
-            } else {
-                let mut expr = y_parts[0].clone();
-                for part in y_parts.iter().skip(1) {
-                    expr = format!("max({},{})", expr, part);
-                }
-                expr
-            };
-            
-            // If max result is -1 (no effect active), use default position
-            let x_combined = format!("if(lt({x_max},0),{default},{x_max})", 
-                x_max = x_max, default = default_x_expr);
-            let y_combined = format!("if(lt({y_max},0),{default},{y_max})", 
-                y_max = y_max, default = default_y_expr);
-            
-            // Build the complete filter chain:
-            // 1. pad: Add gradient padding around video (dark blue)
-            // 2. scale: Zoom by scaling up
-            // 3. crop: Extract output size centered on target
-            let filter = format!(
-                "pad=w={pw}:h={ph}:x={px}:y={py}:color=0x1a1a2e,\
-                 scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,\
-                 crop=w={w}:h={h}:x='max(0,min(iw-{w},{x}))':y='max(0,min(ih-{h},{y}))'",
-                pw = padded_w, ph = padded_h, px = pad_x, py = pad_y,
-                z = zoom_combined,
-                w = width, h = height,
-                x = x_combined, y = y_combined
-            );
-            
-            println!("Filter: {}", filter);
-            
-            args.push("-vf".to_string());
-            args.push(filter);
-        }
+            let sum = zoom_parts.join("+");
+            format!("max(1,{})", sum)
+        };
+        
+        let x_offset = if x_parts.is_empty() {
+            "0".to_string()
+        } else if x_parts.len() == 1 {
+            x_parts[0].clone()
+        } else {
+            x_parts.join("+")
+        };
+        
+        let y_offset = if y_parts.is_empty() {
+            "0".to_string()
+        } else if y_parts.len() == 1 {
+            y_parts[0].clone()
+        } else {
+            y_parts.join("+")
+        };
+        
+        // Build the complete filter chain using overlay approach
+        // 1. Create background canvas at output size
+        // 2. Scale video by base_scale * zoom_factor
+        // 3. Overlay video centered on canvas with offset for target
+        
+        let filter = format!(
+            "color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
+             [0:v]scale=w='iw*{base}*({zoom})':h='ih*{base}*({zoom})':eval=frame:flags=lanczos[vid];\
+             [bg][vid]overlay=x='({w}-overlay_w)/2+({x_off})':y='({h}-overlay_h)/2+({y_off})':eval=frame[out]",
+            bg = bg_color,
+            w = width,
+            h = height,
+            dur = duration,
+            base = base_scale,
+            zoom = zoom_combined,
+            x_off = x_offset,
+            y_off = y_offset
+        );
+        
+        println!("Filter: {}", filter);
+        
+        args.push("-filter_complex".to_string());
+        args.push(filter);
+        args.push("-map".to_string());
+        args.push("[out]".to_string());
+    } else {
+        // No effects - just apply base scale with background
+        let filter = format!(
+            "color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
+             [0:v]scale=w='iw*{base}':h='ih*{base}':flags=lanczos[vid];\
+             [bg][vid]overlay=x='({w}-overlay_w)/2':y='({h}-overlay_h)/2'[out]",
+            bg = bg_color,
+            w = width,
+            h = height,
+            dur = duration,
+            base = base_scale
+        );
+        
+        println!("Filter (no effects): {}", filter);
+        
+        args.push("-filter_complex".to_string());
+        args.push(filter);
+        args.push("-map".to_string());
+        args.push("[out]".to_string());
     }
     
     // Encoding options

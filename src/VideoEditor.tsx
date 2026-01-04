@@ -41,6 +41,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
     const [isExporting, setIsExporting] = useState(false);
     const [exportStatus, setExportStatus] = useState("");
 
+    // Canvas background color (hex format)
+    const [backgroundColor, setBackgroundColor] = useState("#1a1a2e");
+
     const videoUrl = convertFileSrc(videoPath);
 
     // Calculate timeline duration - extends beyond video if effects go further
@@ -450,6 +453,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     trimStart,
                     trimEnd,
                     effects: zoomEffects,
+                    backgroundColor: backgroundColor.replace('#', ''),  // Pass color without # prefix
                 });
             } else {
                 // Fast export (no effects)
@@ -536,6 +540,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     currentTime={currentTime}
                     duration={duration}
                     cursorPositions={cursorPositions}
+                    backgroundColor={backgroundColor}
                     onTogglePlay={togglePlay}
                     formatTimeDetailed={formatTimeDetailed}
                 />
@@ -577,6 +582,8 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 exportStatus={exportStatus}
                 trimStart={trimStart}
                 trimEnd={trimEnd}
+                backgroundColor={backgroundColor}
+                onBackgroundChange={setBackgroundColor}
                 onExport={handleExport}
                 onSaveOriginal={handleSaveOriginal}
                 onEffectUpdate={updateEffect}

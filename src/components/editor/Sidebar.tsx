@@ -2,12 +2,24 @@ import { Effect } from './types';
 import { formatTimeDetailed } from './utils';
 import { EffectSettings } from './EffectSettings';
 
+// Preset background colors
+const BACKGROUND_PRESETS = [
+    { name: 'Dark Blue', color: '#1a1a2e' },
+    { name: 'Dark Purple', color: '#2d1b4e' },
+    { name: 'Black', color: '#000000' },
+    { name: 'Dark Gray', color: '#1f1f1f' },
+    { name: 'White', color: '#ffffff' },
+    { name: 'Light Gray', color: '#f0f0f0' },
+];
+
 interface SidebarProps {
     selectedEffect: Effect | undefined;
     isExporting: boolean;
     exportStatus: string;
     trimStart: number;
     trimEnd: number;
+    backgroundColor: string;
+    onBackgroundChange: (color: string) => void;
     onExport: () => void;
     onSaveOriginal: () => void;
     onEffectUpdate: (id: string, updates: Partial<Effect>) => void;
@@ -19,6 +31,8 @@ export function Sidebar({
     exportStatus,
     trimStart,
     trimEnd,
+    backgroundColor,
+    onBackgroundChange,
     onExport,
     onSaveOriginal,
     onEffectUpdate,
@@ -47,6 +61,43 @@ export function Sidebar({
             >
                 Keep Original
             </button>
+
+            <div className="h-px bg-gray-200" />
+
+            {/* Background Color */}
+            <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-semibold m-0">Canvas Background</h3>
+                <div className="grid grid-cols-3 gap-2">
+                    {BACKGROUND_PRESETS.map((preset) => (
+                        <button
+                            key={preset.color}
+                            title={preset.name}
+                            className={`w-full aspect-square rounded-lg border-2 transition-all duration-200 hover:scale-105 ${backgroundColor === preset.color
+                                    ? 'border-indigo-500 ring-2 ring-indigo-200'
+                                    : 'border-gray-200 hover:border-gray-300'
+                                }`}
+                            style={{ backgroundColor: preset.color }}
+                            onClick={() => onBackgroundChange(preset.color)}
+                        />
+                    ))}
+                </div>
+                {/* Custom color input */}
+                <div className="flex items-center gap-2">
+                    <input
+                        type="color"
+                        value={backgroundColor}
+                        onChange={(e) => onBackgroundChange(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border border-gray-200"
+                    />
+                    <input
+                        type="text"
+                        value={backgroundColor}
+                        onChange={(e) => onBackgroundChange(e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs font-mono border border-gray-200 rounded"
+                        placeholder="#000000"
+                    />
+                </div>
+            </div>
 
             <div className="h-px bg-gray-200" />
 
