@@ -137,66 +137,111 @@ async fn export_with_effects(
     ];
     
     if !effects.is_empty() {
-        // Take the first effect and use its parameters
-        let eff = &effects[0];
-        let s = eff.start_time - trim_start;
-        let e = eff.end_time - trim_start;
-        let scale = eff.scale;
-        let tx = eff.target_x;
-        let ty = eff.target_y;
+        println!("Building filter for {} zoom effects", effects.len());
         
-        println!("Processing effect: relative time {:.2}-{:.2}, scale={:.2}", s, e, scale);
+        // Build expressions that handle ALL effects
+        // Each effect has: start_time, end_time, scale, target_x, target_y
+        // We need expressions that:
+        // 1. zoom_expr: returns the current zoom level based on time
+        // 2. x_expr, y_expr: returns the crop offset based on time and target
         
-        // Calculate static pan offset based on target
-        let pan_x = (tx - 0.5) * 2.0;  // -1 to 1
-        let pan_y = (ty - 0.5) * 2.0;
+        let ease = 0.3; // 300ms ease in/out
         
-        // Build a filter with time-based expressions
-        // CRITICAL: scale filter needs eval=frame to use time variable 't'
-        // Zoom timeline: 1 -> scale over ease period, hold, scale -> 1
-        let ease = 0.3;  // 300ms ease in/out
-        let si = s + ease;
-        let so = e - ease;
-        let delta = scale - 1.0;
+        // Build composite expressions for all effects
+        // Start with default values (no zoom, center position)
+        let mut zoom_parts: Vec<String> = Vec::new();
+        let mut x_parts: Vec<String> = Vec::new();
+        let mut y_parts: Vec<String> = Vec::new();
         
-        // Zoom expression with proper syntax
-        // Using single quotes for the entire expression to avoid shell escaping issues
-        let zoom_expr = format!(
-            "if(lt(t,{s}),1,if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{scale},if(lt(t,{e}),{scale}-{delta}*(t-{so})/{ease},1))))",
-            s = s,
-            si = si,
-            so = so,
-            e = e,
-            scale = scale,
-            delta = delta,
-            ease = ease
-        );
+        for eff in effects.iter() {
+            // Adjust times relative to trim start
+            let s = eff.start_time - trim_start;
+            let e = eff.end_time - trim_start;
+            let scale = eff.scale;
+            let tx = eff.target_x;
+            let ty = eff.target_y;
+            
+            // Skip effects outside the trimmed range
+            if e < 0.0 || s > duration {
+                continue;
+            }
+            
+            let si = s + ease;
+            let so = e - ease;
+            let delta = scale - 1.0;
+            
+            println!("Effect: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3})", s, e, scale, tx, ty);
+            
+            // Zoom expression for this effect
+            // Returns zoom level when inside effect time range, otherwise continues to next check
+            let zoom_expr = format!(
+                "if(between(t,{s},{e}),if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{scale},{scale}-{delta}*(t-{so})/{ease})),0)",
+                s = s, si = si, so = so, e = e, scale = scale, delta = delta, ease = ease
+            );
+            zoom_parts.push(zoom_expr);
+            
+            // Position expressions for this effect
+            // target_x/y are normalized 0-1, need to convert to pixel offsets
+            // When zoomed at scale S, the visible area is (width/S, height/S)
+            // To center on target (tx, ty), we need to crop at:
+            //   crop_x = tx * width * S - width/2 = width * (tx * S - 0.5)
+            // But we're cropping AFTER scale, so iw = width * S
+            //   crop_x = tx * iw - width/2
+            let crop_x = format!(
+                "if(between(t,{s},{e}),{tx}*iw-{half_w},0)",
+                s = s, e = e, tx = tx, half_w = width as f64 / 2.0
+            );
+            let crop_y = format!(
+                "if(between(t,{s},{e}),{ty}*ih-{half_h},0)",
+                s = s, e = e, ty = ty, half_h = height as f64 / 2.0
+            );
+            x_parts.push(crop_x);
+            y_parts.push(crop_y);
+        }
         
-        // Pan expressions: only shift during effect
-        let x_expr = format!(
-            "if(between(t,{s},{e}),{off},0)",
-            s = s, e = e, off = pan_x
-        );
-        let y_expr = format!(
-            "if(between(t,{s},{e}),{off},0)",
-            s = s, e = e, off = pan_y
-        );
-        
-        // Full filter: scale (with eval=frame for time-based) then crop
-        // eval=frame is REQUIRED to use 't' variable in scale filter
-        let filter = format!(
-            "scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,crop=w={w}:h={h}:x='(iw-{w})/2*(1+({x}))':y='(ih-{h})/2*(1+({y}))'",
-            z = zoom_expr,
-            w = width,
-            h = height,
-            x = x_expr,
-            y = y_expr
-        );
-        
-        println!("Filter: {}", filter);
-        
-        args.push("-vf".to_string());
-        args.push(filter);
+        if zoom_parts.is_empty() {
+            println!("No valid effects after filtering, skipping zoom filter");
+        } else {
+            // Combine all zoom parts: take max (only one effect active at a time typically)
+            // Use nested if-else: check each effect in order
+            let zoom_combined: String = if zoom_parts.len() == 1 {
+                format!("max(1,{})", zoom_parts[0])
+            } else {
+                // Sum all zoom expressions (each returns 0 when not active) and take max with 1
+                let sum = zoom_parts.join("+");
+                format!("max(1,{})", sum)
+            };
+            
+            // Combine position parts similarly (sum, each returns 0 when not active)
+            let x_combined = if x_parts.len() == 1 {
+                x_parts[0].clone()
+            } else {
+                x_parts.join("+")
+            };
+            
+            let y_combined = if y_parts.len() == 1 {
+                y_parts[0].clone()
+            } else {
+                y_parts.join("+")
+            };
+            
+            // Build the filter
+            // scale: multiply dimensions by zoom factor
+            // crop: extract original resolution centered on target position
+            let filter = format!(
+                "scale=w='iw*({z})':h='ih*({z})':eval=frame:flags=lanczos,crop=w={w}:h={h}:x='max(0,min(iw-{w},{x}))':y='max(0,min(ih-{h},{y}))'",
+                z = zoom_combined,
+                w = width,
+                h = height,
+                x = x_combined,
+                y = y_combined
+            );
+            
+            println!("Filter: {}", filter);
+            
+            args.push("-vf".to_string());
+            args.push(filter);
+        }
     }
     
     // Encoding options
