@@ -1,5 +1,5 @@
-import { Effect } from './types';
-import { EFFECT_CONFIG } from './constants';
+import { Effect, EasingPreset } from './types';
+import { EFFECT_CONFIG, ZOOM_EASING_PRESETS } from './constants';
 
 interface EffectSettingsProps {
     effect: Effect;
@@ -14,8 +14,50 @@ export function EffectSettings({ effect, onUpdate }: EffectSettingsProps) {
             </h3>
 
             {effect.type === 'zoom' && (
-                <div className="text-xs text-gray-500">
-                    Zoom follows cursor position automatically.
+                <div className="flex flex-col gap-4">
+                    {/* Zoom Scale */}
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-gray-600 font-medium">Zoom Scale</label>
+                        <div className="flex items-center gap-2.5">
+                            <input
+                                type="range"
+                                min="1.5"
+                                max="4"
+                                step="0.1"
+                                value={effect.scale || 2.5}
+                                onChange={(e) => onUpdate(effect.id, {
+                                    scale: parseFloat(e.target.value)
+                                })}
+                                className="range-slider flex-1"
+                            />
+                            <span className="text-xs text-gray-900 font-medium min-w-10 text-right">
+                                {(effect.scale || 2.5).toFixed(1)}x
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Easing Preset */}
+                    <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-gray-600 font-medium">Animation Speed</label>
+                        <div className="grid grid-cols-4 gap-1">
+                            {(Object.keys(ZOOM_EASING_PRESETS) as EasingPreset[]).map((preset) => (
+                                <button
+                                    key={preset}
+                                    className={`px-2 py-1.5 text-xs font-medium rounded-md border transition-all duration-150 ${(effect.easing || 'mellow') === preset
+                                            ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
+                                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    onClick={() => onUpdate(effect.id, { easing: preset })}
+                                >
+                                    {ZOOM_EASING_PRESETS[preset].label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                        Zoom follows cursor position automatically.
+                    </div>
                 </div>
             )}
 
@@ -61,3 +103,4 @@ export function EffectSettings({ effect, onUpdate }: EffectSettingsProps) {
         </div>
     );
 }
+

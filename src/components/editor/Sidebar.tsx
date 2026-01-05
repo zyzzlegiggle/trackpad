@@ -1,4 +1,4 @@
-import { Effect } from './types';
+import { Effect, CanvasSettings } from './types';
 import { formatTimeDetailed } from './utils';
 import { EffectSettings } from './EffectSettings';
 
@@ -18,8 +18,8 @@ interface SidebarProps {
     exportStatus: string;
     trimStart: number;
     trimEnd: number;
-    backgroundColor: string;
-    onBackgroundChange: (color: string) => void;
+    canvasSettings: CanvasSettings;
+    onCanvasSettingsChange: (settings: Partial<CanvasSettings>) => void;
     onExport: () => void;
     onSaveOriginal: () => void;
     onEffectUpdate: (id: string, updates: Partial<Effect>) => void;
@@ -31,8 +31,8 @@ export function Sidebar({
     exportStatus,
     trimStart,
     trimEnd,
-    backgroundColor,
-    onBackgroundChange,
+    canvasSettings,
+    onCanvasSettingsChange,
     onExport,
     onSaveOriginal,
     onEffectUpdate,
@@ -64,39 +64,87 @@ export function Sidebar({
 
             <div className="h-px bg-gray-200" />
 
-            {/* Background Color */}
+            {/* Canvas Settings */}
             <div className="flex flex-col gap-3">
-                <h3 className="text-sm font-semibold m-0">Canvas Background</h3>
-                <div className="grid grid-cols-3 gap-2">
+                <h3 className="text-sm font-semibold m-0">Canvas Style</h3>
+
+                {/* Background Color Presets */}
+                <div className="grid grid-cols-6 gap-1.5">
                     {BACKGROUND_PRESETS.map((preset) => (
                         <button
                             key={preset.color}
                             title={preset.name}
-                            className={`w-full aspect-square rounded-lg border-2 transition-all duration-200 hover:scale-105 ${backgroundColor === preset.color
-                                    ? 'border-indigo-500 ring-2 ring-indigo-200'
-                                    : 'border-gray-200 hover:border-gray-300'
+                            className={`w-full aspect-square rounded-md border-2 transition-all duration-200 hover:scale-105 ${canvasSettings.backgroundColor === preset.color
+                                ? 'border-indigo-500 ring-2 ring-indigo-200'
+                                : 'border-gray-200 hover:border-gray-300'
                                 }`}
                             style={{ backgroundColor: preset.color }}
-                            onClick={() => onBackgroundChange(preset.color)}
+                            onClick={() => onCanvasSettingsChange({ backgroundColor: preset.color })}
                         />
                     ))}
                 </div>
+
                 {/* Custom color input */}
                 <div className="flex items-center gap-2">
                     <input
                         type="color"
-                        value={backgroundColor}
-                        onChange={(e) => onBackgroundChange(e.target.value)}
+                        value={canvasSettings.backgroundColor}
+                        onChange={(e) => onCanvasSettingsChange({ backgroundColor: e.target.value })}
                         className="w-8 h-8 rounded cursor-pointer border border-gray-200"
                     />
                     <input
                         type="text"
-                        value={backgroundColor}
-                        onChange={(e) => onBackgroundChange(e.target.value)}
+                        value={canvasSettings.backgroundColor}
+                        onChange={(e) => onCanvasSettingsChange({ backgroundColor: e.target.value })}
                         className="flex-1 px-2 py-1 text-xs font-mono border border-gray-200 rounded"
                         placeholder="#000000"
                     />
                 </div>
+
+                {/* Border Radius */}
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs text-gray-600 font-medium">Corner Radius</label>
+                    <div className="flex items-center gap-2.5">
+                        <input
+                            type="range"
+                            min="0"
+                            max="32"
+                            step="2"
+                            value={canvasSettings.borderRadius}
+                            onChange={(e) => onCanvasSettingsChange({ borderRadius: parseInt(e.target.value) })}
+                            className="range-slider flex-1"
+                        />
+                        <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{canvasSettings.borderRadius}px</span>
+                    </div>
+                </div>
+
+                {/* Padding */}
+                <div className="flex flex-col gap-1.5">
+                    <label className="text-xs text-gray-600 font-medium">Padding</label>
+                    <div className="flex items-center gap-2.5">
+                        <input
+                            type="range"
+                            min="0"
+                            max="20"
+                            step="1"
+                            value={canvasSettings.paddingPercent}
+                            onChange={(e) => onCanvasSettingsChange({ paddingPercent: parseInt(e.target.value) })}
+                            className="range-slider flex-1"
+                        />
+                        <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{canvasSettings.paddingPercent}%</span>
+                    </div>
+                </div>
+
+                {/* Click Ripple Toggle */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={canvasSettings.clickRippleEnabled}
+                        onChange={(e) => onCanvasSettingsChange({ clickRippleEnabled: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs text-gray-600 font-medium">Show click ripples</span>
+                </label>
             </div>
 
             <div className="h-px bg-gray-200" />
@@ -123,3 +171,4 @@ export function Sidebar({
         </div>
     );
 }
+

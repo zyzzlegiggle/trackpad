@@ -1,5 +1,6 @@
-import { RefObject, useMemo, useRef, useLayoutEffect } from 'react';
-import { Effect, CursorPosition } from './types';
+import { RefObject, useMemo, useRef, useLayoutEffect, useState, useEffect } from 'react';
+import { Effect, CursorPosition, ClickEvent, CanvasSettings, EasingPreset } from './types';
+import { ZOOM_EASING_PRESETS } from './constants';
 
 interface VideoPreviewProps {
     videoUrl: string;
@@ -11,9 +12,18 @@ interface VideoPreviewProps {
     currentTime: number;
     duration: number;
     cursorPositions: CursorPosition[];
-    backgroundColor: string;
+    clickEvents: ClickEvent[];
+    canvasSettings: CanvasSettings;
     onTogglePlay: () => void;
     formatTimeDetailed: (seconds: number) => string;
+}
+
+// Click ripple component - renders expanding circle at click position
+interface RippleState {
+    id: string;
+    x: number; // Normalized 0-1
+    y: number; // Normalized 0-1
+    startTime: number;
 }
 
 // Binary search with cached last index for sequential access optimization
@@ -89,7 +99,8 @@ export function VideoPreview({
     currentTime,
     duration,
     cursorPositions,
-    backgroundColor,
+    clickEvents,
+    canvasSettings,
     onTogglePlay,
     formatTimeDetailed,
 }: VideoPreviewProps) {
@@ -99,11 +110,63 @@ export function VideoPreview({
     // Ref for direct DOM manipulation - bypasses React reconciliation for 60fps
     const zoomContainerRef = useRef<HTMLDivElement>(null);
 
+    // Active ripples for click animation
+    const [activeRipples, setActiveRipples] = useState<RippleState[]>([]);
+    const lastProcessedClickRef = useRef<number>(-1);
+
     // Check if there's an active zoom effect first
     const zoomEffect = useMemo(
         () => activeEffects.find(e => e.type === 'zoom'),
         [activeEffects]
     );
+
+    // Get easing duration from zoom effect
+    const easingDuration = useMemo(() => {
+        if (!zoomEffect) return 0.35; // Default mellow
+        const preset: EasingPreset = zoomEffect.easing || 'mellow';
+        return ZOOM_EASING_PRESETS[preset].duration;
+    }, [zoomEffect]);
+
+    // Process click events to show ripples during playback
+    useEffect(() => {
+        if (!canvasSettings.clickRippleEnabled || !isPlaying) return;
+
+        const currentTimeMs = currentTime * 1000;
+        const RIPPLE_DURATION_MS = 400;
+        const CLICK_TOLERANCE_MS = 50; // Show ripple if within 50ms of click
+
+        // Find clicks near current time that we haven't processed yet
+        clickEvents.forEach((click, index) => {
+            if (index <= lastProcessedClickRef.current) return;
+
+            const timeDiff = currentTimeMs - click.timestamp_ms;
+            if (timeDiff >= 0 && timeDiff < CLICK_TOLERANCE_MS) {
+                // Add new ripple
+                const ripple: RippleState = {
+                    id: `ripple-${click.timestamp_ms}-${index}`,
+                    x: click.x,
+                    y: click.y,
+                    startTime: Date.now(),
+                };
+                setActiveRipples(prev => [...prev, ripple]);
+                lastProcessedClickRef.current = index;
+
+                // Remove ripple after animation completes
+                setTimeout(() => {
+                    setActiveRipples(prev => prev.filter(r => r.id !== ripple.id));
+                }, RIPPLE_DURATION_MS);
+            }
+        });
+    }, [currentTime, clickEvents, isPlaying, canvasSettings.clickRippleEnabled]);
+
+    // Reset click processing when seeking or stopping
+    useEffect(() => {
+        if (!isPlaying) {
+            // When paused/stopped, reset to process clicks from the beginning
+            lastProcessedClickRef.current = -1;
+            setActiveRipples([]);
+        }
+    }, [isPlaying]);
 
     // PERFORMANCE: Use useLayoutEffect + direct DOM manipulation for 60fps
     // This bypasses React's reconciliation, updating the DOM directly
@@ -112,9 +175,9 @@ export function VideoPreview({
         const container = zoomContainerRef.current;
         if (!container) return;
 
-        // Constants for zoom
-        const ZOOM_SCALE = 3.0;
-        const ZOOM_TRANSITION_TIME = 0.3;
+        // Use effect's scale or default to 3.0
+        const ZOOM_SCALE = zoomEffect?.scale || 3.0;
+        const ZOOM_TRANSITION_TIME = easingDuration;
 
         // No zoom effect - set default state with transition
         if (!zoomEffect) {
@@ -177,7 +240,7 @@ export function VideoPreview({
 
         // Direct DOM update - no React re-render!
         container.style.transform = `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`;
-    }, [zoomEffect, currentTime, cursorPositions]);
+    }, [zoomEffect, currentTime, cursorPositions, easingDuration]);
 
     // Memoize blur filter
     const videoFilter = useMemo(() => {
@@ -204,7 +267,7 @@ export function VideoPreview({
             <div
                 className="flex-1 flex items-center justify-center overflow-hidden"
                 style={{
-                    backgroundColor: backgroundColor,
+                    backgroundColor: canvasSettings.backgroundColor,
                 }}
             >
                 <div
@@ -212,21 +275,36 @@ export function VideoPreview({
                     className="relative flex items-center justify-center w-full h-full"
                     style={{
                         ...videoFilter,
-                        // Reduced padding to fit better in container
-                        padding: '5%',
+                        padding: `${canvasSettings.paddingPercent}%`,
                         willChange: 'transform',  // GPU acceleration hint
                     }}
                 >
                     <video
                         ref={videoRef}
                         src={videoUrl}
-                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                        className="max-w-full max-h-full object-contain shadow-2xl"
                         onClick={onTogglePlay}
                         style={{
                             display: videoError ? 'none' : 'block',
                             imageRendering: 'auto',  // Let browser optimize
+                            borderRadius: `${canvasSettings.borderRadius}px`,
                         }}
                     />
+
+                    {/* Click Ripples Overlay - positioned over the video */}
+                    {canvasSettings.clickRippleEnabled && activeRipples.map(ripple => (
+                        <div
+                            key={ripple.id}
+                            className="absolute pointer-events-none rounded-full border-2 border-white/80"
+                            style={{
+                                left: `${ripple.x * 100}%`,
+                                top: `${ripple.y * 100}%`,
+                                width: '40px',
+                                height: '40px',
+                                animation: 'click-ripple 0.4s ease-out forwards',
+                            }}
+                        />
+                    ))}
                 </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>
@@ -265,3 +343,4 @@ export function VideoPreview({
         </div>
     );
 }
+

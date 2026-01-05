@@ -18,6 +18,7 @@ interface TimelineProps {
     onEffectSelect: (id: string) => void;
     onEffectMoveStart: (e: React.MouseEvent, effect: Effect) => void;
     onEffectResizeStart: (e: React.MouseEvent, effectId: string, edge: 'start' | 'end') => void;
+    onQuickAddZoom?: (time: number) => void; // Double-click to add zoom at position
     timelineRef: React.RefObject<HTMLDivElement | null>;
     tracksContainerRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -36,6 +37,7 @@ export function Timeline({
     onEffectSelect,
     onEffectMoveStart,
     onEffectResizeStart,
+    onQuickAddZoom,
     timelineRef,
     tracksContainerRef,
 }: TimelineProps) {
@@ -59,6 +61,19 @@ export function Timeline({
         onSeek(Math.max(0, Math.min(duration, newTime)));
     }, [duration, onSeek, timelineRef]);
 
+    // Double-click to add zoom effect at that time position
+    const handleTimelineDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!timelineRef.current || duration === 0 || !onQuickAddZoom) return;
+        if ((e.target as HTMLElement).closest('.effect-segment, .trim-handle, .effect-handle')) return;
+
+        const rect = timelineRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percentage = x / rect.width;
+        const clickTime = percentage * duration;
+
+        onQuickAddZoom(Math.max(0, Math.min(duration, clickTime)));
+    }, [duration, onQuickAddZoom, timelineRef]);
+
     return (
         <div className="bg-white rounded-xl px-4 py-3 shrink-0 border border-gray-200">
             {/* Time Markers */}
@@ -80,6 +95,8 @@ export function Timeline({
                     className="relative flex flex-col gap-1.5 min-h-10 cursor-pointer"
                     ref={timelineRef}
                     onClick={handleTimelineClick}
+                    onDoubleClick={handleTimelineDoubleClick}
+                    title="Double-click to add zoom effect"
                 >
                     {/* Video/Trim Track */}
                     <TrimTrack

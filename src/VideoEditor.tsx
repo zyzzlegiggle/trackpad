@@ -4,7 +4,9 @@ import {
     VideoEditorProps,
     Effect,
     EffectType,
+    CanvasSettings,
     EFFECT_CONFIG,
+    DEFAULT_CANVAS_SETTINGS,
     rangesOverlap,
     formatTimeDetailed,
     generateTimeMarkers,
@@ -41,8 +43,13 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
     const [isExporting, setIsExporting] = useState(false);
     const [exportStatus, setExportStatus] = useState("");
 
-    // Canvas background color (hex format)
-    const [backgroundColor, setBackgroundColor] = useState("#1a1a2e");
+    // Canvas settings (background, border radius, padding, click ripples)
+    const [canvasSettings, setCanvasSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
+
+    // Update canvas settings helper
+    const updateCanvasSettings = (updates: Partial<CanvasSettings>) => {
+        setCanvasSettings(prev => ({ ...prev, ...updates }));
+    };
 
     const videoUrl = convertFileSrc(videoPath);
 
@@ -302,6 +309,30 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         setSelectedEffectId(newEffect.id);
     };
 
+    // Quick-add zoom at specific time (from timeline double-click)
+    const quickAddZoom = (time: number) => {
+        const config = EFFECT_CONFIG.zoom;
+        const effectDuration = config.defaultDuration;
+
+        const startTime = findAvailableSlotInLane(0, time, effectDuration);
+        const endTime = startTime + effectDuration;
+
+        const newEffect: Effect = {
+            id: `zoom-${Date.now()}`,
+            type: 'zoom',
+            startTime,
+            endTime,
+            lane: 0,
+            scale: 2.5,
+            targetX: 0.5,
+            targetY: 0.5,
+            easing: 'mellow',
+        };
+
+        setEffects([...effects, newEffect]);
+        setSelectedEffectId(newEffect.id);
+    };
+
     const removeEffect = (id: string) => {
         setEffects(effects.filter(e => e.id !== id));
         if (selectedEffectId === id) {
@@ -395,6 +426,55 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         };
     }, [isDragging, duration, trimStart, trimEnd, effects, dragStartY, dragStartLane]);
 
+    // Keyboard shortcuts for better UX (like Cursorful/Screen Studio)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't handle if user is typing in an input
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+
+            const video = videoRef.current;
+
+            switch (e.key) {
+                case ' ': // Space - play/pause
+                    e.preventDefault();
+                    togglePlay();
+                    break;
+                case 'ArrowLeft': // Left arrow - seek back 5s
+                    e.preventDefault();
+                    if (video) {
+                        const newTime = Math.max(trimStart, video.currentTime - 5);
+                        video.currentTime = newTime;
+                        setCurrentTime(newTime);
+                    }
+                    break;
+                case 'ArrowRight': // Right arrow - seek forward 5s
+                    e.preventDefault();
+                    if (video) {
+                        const newTime = Math.min(trimEnd, video.currentTime + 5);
+                        video.currentTime = newTime;
+                        setCurrentTime(newTime);
+                    }
+                    break;
+                case 'Delete':
+                case 'Backspace': // Delete selected effect
+                    if (selectedEffectId) {
+                        e.preventDefault();
+                        removeEffect(selectedEffectId);
+                    }
+                    break;
+                case 'Escape': // Close editor
+                    e.preventDefault();
+                    onClose();
+                    break;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [trimStart, trimEnd, selectedEffectId, onClose]);
+
     // Compact lanes to remove gaps
     const compactLanes = () => {
         const usedLanes = [...new Set(effects.map(e => e.lane))].sort((a, b) => a - b);
@@ -453,7 +533,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     trimStart,
                     trimEnd,
                     effects: zoomEffects,
-                    backgroundColor: backgroundColor.replace('#', ''),  // Pass color without # prefix
+                    backgroundColor: canvasSettings.backgroundColor.replace('#', ''),  // Pass color without # prefix
                 });
             } else {
                 // Fast export (no effects)
@@ -520,6 +600,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     <button
                         className="w-8 h-8 border-none bg-gray-200 rounded-lg cursor-pointer flex items-center justify-center text-gray-600 transition-all duration-200 hover:bg-gray-300 hover:text-gray-900"
                         onClick={onClose}
+                        title="Close (Esc)"
                     >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4.5 h-4.5">
                             <polyline points="15,18 9,12 15,6" />
@@ -527,6 +608,15 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     </button>
                     <span className="text-base font-semibold text-gray-900">Edit Recording</span>
                     <div className="flex-1" />
+                    {/* Keyboard shortcuts hint */}
+                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Space</kbd>
+                        <span>Play</span>
+                        <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">←→</kbd>
+                        <span>Seek</span>
+                        <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Del</kbd>
+                        <span>Remove</span>
+                    </div>
                 </div>
 
                 {/* Video Preview */}
@@ -540,7 +630,8 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     currentTime={currentTime}
                     duration={duration}
                     cursorPositions={cursorPositions}
-                    backgroundColor={backgroundColor}
+                    clickEvents={clickEvents}
+                    canvasSettings={canvasSettings}
                     onTogglePlay={togglePlay}
                     formatTimeDetailed={formatTimeDetailed}
                 />
@@ -570,6 +661,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                         e.stopPropagation();
                         setIsDragging(`${effectId}-${edge}`);
                     }}
+                    onQuickAddZoom={quickAddZoom}
                     timelineRef={timelineRef}
                     tracksContainerRef={tracksContainerRef}
                 />
@@ -582,8 +674,8 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 exportStatus={exportStatus}
                 trimStart={trimStart}
                 trimEnd={trimEnd}
-                backgroundColor={backgroundColor}
-                onBackgroundChange={setBackgroundColor}
+                canvasSettings={canvasSettings}
+                onCanvasSettingsChange={updateCanvasSettings}
                 onExport={handleExport}
                 onSaveOriginal={handleSaveOriginal}
                 onEffectUpdate={updateEffect}

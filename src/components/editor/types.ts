@@ -23,6 +23,17 @@ export interface VideoEditorProps {
 // Effect types
 export type EffectType = 'zoom' | 'blur' | 'slowmo';
 
+// Zoom easing presets
+export type EasingPreset = 'slow' | 'mellow' | 'quick' | 'rapid';
+
+// Canvas styling settings
+export interface CanvasSettings {
+    backgroundColor: string;
+    borderRadius: number;      // 0-32px
+    paddingPercent: number;    // 0-20%
+    clickRippleEnabled: boolean;
+}
+
 // Unified effect interface with lane support
 export interface Effect {
     id: string;
@@ -36,6 +47,7 @@ export interface Effect {
     targetY?: number;
     intensity?: number;
     speed?: number;
+    easing?: EasingPreset; // Zoom animation speed preset
 }
 
 // Effect configuration type
