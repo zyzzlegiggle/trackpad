@@ -1,5 +1,5 @@
-import { RefObject, useMemo, useRef } from 'react';
-import { Effect, CursorPosition, ClickEvent } from './types';
+import { RefObject, useMemo, useRef, useLayoutEffect } from 'react';
+import { Effect, CursorPosition } from './types';
 
 interface VideoPreviewProps {
     videoUrl: string;
@@ -11,7 +11,6 @@ interface VideoPreviewProps {
     currentTime: number;
     duration: number;
     cursorPositions: CursorPosition[];
-    clickEvents?: ClickEvent[];
     backgroundColor: string;
     onTogglePlay: () => void;
     formatTimeDetailed: (seconds: number) => string;
@@ -90,7 +89,6 @@ export function VideoPreview({
     currentTime,
     duration,
     cursorPositions,
-    clickEvents = [],
     backgroundColor,
     onTogglePlay,
     formatTimeDetailed,
@@ -98,44 +96,35 @@ export function VideoPreview({
     // Cache for cursor position lookup (sequential access optimization)
     const cursorIndexRef = useRef(0);
 
-    // Click indicator - computed directly, no state updates
-    // Using useMemo instead of useEffect/useState to avoid re-renders on every frame
-    const activeClick = useMemo(() => {
-        if (clickEvents.length === 0) return null;
+    // Ref for direct DOM manipulation - bypasses React reconciliation for 60fps
+    const zoomContainerRef = useRef<HTMLDivElement>(null);
 
-        const currentTimeMs = currentTime * 1000;
-        const CLICK_DISPLAY_DURATION = 500; // Show click for 500ms
-
-        // Find if there's a click that should be displayed
-        const recentClick = clickEvents.find(click => {
-            const timeSinceClick = currentTimeMs - click.timestamp_ms;
-            return timeSinceClick >= 0 && timeSinceClick < CLICK_DISPLAY_DURATION;
-        });
-
-        if (recentClick) {
-            return { x: recentClick.x, y: recentClick.y, id: recentClick.timestamp_ms };
-        }
-        return null;
-    }, [currentTime, clickEvents]);
-
-    // Check if there's an active zoom effect first (early bailout)
+    // Check if there's an active zoom effect first
     const zoomEffect = useMemo(
         () => activeEffects.find(e => e.type === 'zoom'),
         [activeEffects]
     );
 
-    const zoomStyle = useMemo(() => {
-        // No zoom effect - use CSS transition for smooth return to normal
+    // PERFORMANCE: Use useLayoutEffect + direct DOM manipulation for 60fps
+    // This bypasses React's reconciliation, updating the DOM directly
+    // This is how professional tools like Cursorful/Screen Studio achieve smooth animations
+    useLayoutEffect(() => {
+        const container = zoomContainerRef.current;
+        if (!container) return;
+
+        // Constants for zoom
+        const ZOOM_SCALE = 3.0;
+        const ZOOM_TRANSITION_TIME = 0.3;
+
+        // No zoom effect - set default state with transition
         if (!zoomEffect) {
-            return {
-                transform: 'scale(1) translate(0%, 0%)',
-                transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
-            };
+            container.style.transform = 'scale(1) translate(0%, 0%)';
+            container.style.transition = 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+            return;
         }
 
-        // Constants - increased zoom for better focus
-        const ZOOM_SCALE = 2.0;  // Increased from 1.5 for tighter focus
-        const ZOOM_TRANSITION_TIME = 0.4;  // Faster transition for snappier feel
+        // Active zoom effect - disable CSS transition, use direct calculation
+        container.style.transition = 'none';
 
         const timeInEffect = currentTime - zoomEffect.startTime;
         const timeToEnd = zoomEffect.endTime - currentTime;
@@ -170,7 +159,7 @@ export function VideoPreview({
             }
         }
 
-        // Calculate zoom intensity with smoothstep (handles smooth animation mathematically)
+        // Calculate zoom intensity with smoothstep
         let zoomIntensity: number;
         if (timeInEffect < ZOOM_TRANSITION_TIME) {
             const t = timeInEffect / ZOOM_TRANSITION_TIME;
@@ -186,12 +175,8 @@ export function VideoPreview({
         const translateX = (0.5 - viewportCenterX) * (currentScale - 1) * 100;
         const translateY = (0.5 - viewportCenterY) * (currentScale - 1) * 100;
 
-        // CRITICAL: No CSS transition during active zoom - smoothstep handles smoothness
-        // CSS transitions fight against rapid time updates causing lag
-        return {
-            transform: `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`,
-            // No transition - direct updates are smoother during playback
-        };
+        // Direct DOM update - no React re-render!
+        container.style.transform = `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`;
     }, [zoomEffect, currentTime, cursorPositions]);
 
     // Memoize blur filter
@@ -217,58 +202,31 @@ export function VideoPreview({
             {/* Padded canvas container - matches export behavior */}
             {/* When zooming to edges, the background color shows instead of black */}
             <div
-                className="flex-1 flex items-center justify-center"
+                className="flex-1 flex items-center justify-center overflow-hidden"
                 style={{
                     backgroundColor: backgroundColor,
                 }}
             >
                 <div
-                    className="relative flex items-center justify-center"
+                    ref={zoomContainerRef}
+                    className="relative flex items-center justify-center w-full h-full"
                     style={{
-                        ...zoomStyle,
                         ...videoFilter,
-                        // Add padding around video for zoom at edges
-                        padding: '15%',
+                        // Reduced padding to fit better in container
+                        padding: '5%',
+                        willChange: 'transform',  // GPU acceleration hint
                     }}
                 >
-                    <div className="relative">
-                        <video
-                            ref={videoRef}
-                            src={videoUrl}
-                            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-                            onClick={onTogglePlay}
-                            style={{ display: videoError ? 'none' : 'block' }}
-                        />
-                        {/* Click ripple indicator */}
-                        {activeClick && (
-                            <div
-                                key={activeClick.id}
-                                className="absolute pointer-events-none"
-                                style={{
-                                    left: `${activeClick.x * 100}%`,
-                                    top: `${activeClick.y * 100}%`,
-                                    transform: 'translate(-50%, -50%)',
-                                }}
-                            >
-                                {/* Outer ring - expands */}
-                                <div
-                                    className="absolute w-12 h-12 rounded-full border-2 border-white/80"
-                                    style={{
-                                        transform: 'translate(-50%, -50%)',
-                                        animation: 'click-ripple 0.5s ease-out forwards',
-                                    }}
-                                />
-                                {/* Inner dot */}
-                                <div
-                                    className="absolute w-3 h-3 rounded-full bg-white/90 shadow-lg"
-                                    style={{
-                                        transform: 'translate(-50%, -50%)',
-                                        animation: 'click-dot 0.5s ease-out forwards',
-                                    }}
-                                />
-                            </div>
-                        )}
-                    </div>
+                    <video
+                        ref={videoRef}
+                        src={videoUrl}
+                        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+                        onClick={onTogglePlay}
+                        style={{
+                            display: videoError ? 'none' : 'block',
+                            imageRendering: 'auto',  // Let browser optimize
+                        }}
+                    />
                 </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>
