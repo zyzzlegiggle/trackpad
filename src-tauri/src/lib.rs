@@ -82,6 +82,22 @@ struct ZoomEffect {
     target_y: f64,  // Normalized 0-1
 }
 
+// Cursor frame for export - represents cursor position at a point in time
+#[derive(serde::Deserialize, Debug, Clone)]
+struct CursorFrame {
+    timestamp_ms: u64,
+    x: f64,  // Normalized 0-1
+    y: f64,  // Normalized 0-1
+}
+
+// Cursor settings for export rendering
+#[derive(serde::Deserialize, Debug)]
+struct CursorExportSettings {
+    visible: bool,
+    size: i32,       // Cursor size in pixels
+    color: String,   // Hex color without #
+}
+
 #[tauri::command]
 async fn export_with_effects(
     input_path: String,
@@ -89,7 +105,9 @@ async fn export_with_effects(
     trim_start: f64,
     trim_end: f64,
     effects: Vec<ZoomEffect>,
-    background_color: Option<String>,  // Hex color without # prefix
+    background_color: Option<String>,
+    cursor_positions: Option<Vec<CursorFrame>>,
+    cursor_settings: Option<CursorExportSettings>,
 ) -> Result<String, String> {
     let duration = trim_end - trim_start;
     let bg_color = background_color.unwrap_or_else(|| "1a1a2e".to_string());

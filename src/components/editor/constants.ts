@@ -1,4 +1,4 @@
-import { EffectType, EffectConfig, EasingPreset, CanvasSettings } from './types';
+import { EffectType, EffectConfig, EasingPreset, CanvasSettings, CursorSettings, CursorStyle } from './types';
 
 export const EFFECT_CONFIG: Record<EffectType, EffectConfig> = {
     zoom: { label: 'Zoom', color: '#10b981', defaultDuration: 2 },
@@ -20,6 +20,24 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
     borderRadius: 12,
     paddingPercent: 5,
     clickRippleEnabled: false,
+};
+
+// Cursor style options
+export const CURSOR_STYLES: { value: CursorStyle; label: string }[] = [
+    { value: 'pointer', label: 'Pointer' },
+    { value: 'circle', label: 'Circle' },
+    { value: 'crosshair', label: 'Crosshair' },
+];
+
+// Default cursor settings
+export const DEFAULT_CURSOR_SETTINGS: CursorSettings = {
+    visible: true,
+    style: 'pointer',
+    size: 24,
+    color: '#ffffff',
+    smoothing: 0.15,        // Lerp factor (higher = smoother)
+    velocityScale: true,    // Enlarge on fast movement
+    clickRipple: true,      // Show click ripples
 };
 
 // Export resolution options

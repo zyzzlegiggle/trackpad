@@ -6,9 +6,11 @@ import {
     EffectType,
     CanvasSettings,
     ExportSettings,
+    CursorSettings,
     EFFECT_CONFIG,
     DEFAULT_CANVAS_SETTINGS,
     DEFAULT_EXPORT_SETTINGS,
+    DEFAULT_CURSOR_SETTINGS,
     rangesOverlap,
     formatTimeDetailed,
     generateTimeMarkers,
@@ -50,6 +52,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
 
     // Export settings (resolution, format, quality)
     const [exportSettings, setExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
+
+    // Cursor settings (style, size, color, smoothing, effects)
+    const [cursorSettings, setCursorSettings] = useState<CursorSettings>(DEFAULT_CURSOR_SETTINGS);
 
     // Update canvas settings helper
     const updateCanvasSettings = (updates: Partial<CanvasSettings>) => {
@@ -642,6 +647,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     cursorPositions={cursorPositions}
                     clickEvents={clickEvents}
                     canvasSettings={canvasSettings}
+                    cursorSettings={cursorSettings}
                     onTogglePlay={togglePlay}
                     formatTimeDetailed={formatTimeDetailed}
                 />
@@ -685,8 +691,10 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 trimStart={trimStart}
                 trimEnd={trimEnd}
                 canvasSettings={canvasSettings}
+                cursorSettings={cursorSettings}
                 exportSettings={exportSettings}
                 onCanvasSettingsChange={updateCanvasSettings}
+                onCursorSettingsChange={(updates) => setCursorSettings(prev => ({ ...prev, ...updates }))}
                 onExportSettingsChange={updateExportSettings}
                 onExport={handleExport}
                 onSaveOriginal={handleSaveOriginal}

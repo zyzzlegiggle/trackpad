@@ -441,7 +441,7 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
 
                 let settings = Settings::new(
                     window,
-                    CursorCaptureSettings::Default,
+                    CursorCaptureSettings::WithoutCursor,  // Hide system cursor - we render our own
                     DrawBorderSettings::Default,
                     SecondaryWindowSettings::Default,
                     MinimumUpdateIntervalSettings::Default,
@@ -475,7 +475,7 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
 
                 let settings = Settings::new(
                     primary_monitor,
-                    CursorCaptureSettings::Default,
+                    CursorCaptureSettings::WithoutCursor,  // Hide system cursor - we render our own
                     DrawBorderSettings::Default,
                     SecondaryWindowSettings::Default,
                     MinimumUpdateIntervalSettings::Default,

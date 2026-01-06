@@ -1,5 +1,5 @@
 import { RefObject, useMemo, useRef, useState, useEffect } from 'react';
-import { Effect, CursorPosition, ClickEvent, CanvasSettings, EasingPreset } from './types';
+import { Effect, CursorPosition, ClickEvent, CanvasSettings, CursorSettings, EasingPreset } from './types';
 import { ZOOM_EASING_PRESETS } from './constants';
 
 interface VideoPreviewProps {
@@ -14,6 +14,7 @@ interface VideoPreviewProps {
     cursorPositions: CursorPosition[];
     clickEvents: ClickEvent[];
     canvasSettings: CanvasSettings;
+    cursorSettings: CursorSettings;
     onTogglePlay: () => void;
     formatTimeDetailed: (seconds: number) => string;
 }
@@ -101,6 +102,7 @@ export function VideoPreview({
     cursorPositions,
     clickEvents,
     canvasSettings,
+    cursorSettings,
     onTogglePlay,
     formatTimeDetailed,
 }: VideoPreviewProps) {
@@ -113,6 +115,10 @@ export function VideoPreview({
     // Active ripples for click animation
     const [activeRipples, setActiveRipples] = useState<RippleState[]>([]);
     const lastProcessedClickRef = useRef<number>(-1);
+
+    // Custom cursor state - position and velocity for smooth rendering
+    const cursorOverlayRef = useRef<HTMLDivElement>(null);
+    const cursorStateRef = useRef({ x: 0.5, y: 0.5, prevX: 0.5, prevY: 0.5, velocity: 0 });
 
     // Check if there's an active zoom effect first
     const zoomEffect = useMemo(
@@ -182,13 +188,15 @@ export function VideoPreview({
     const activeEffectsRef = useRef(activeEffects);
     const cursorPositionsRef = useRef(cursorPositions);
     const easingDurationRef = useRef(easingDuration);
+    const cursorSettingsRef = useRef(cursorSettings);
 
     // Update refs when props change
     useEffect(() => {
         activeEffectsRef.current = activeEffects;
         cursorPositionsRef.current = cursorPositions;
         easingDurationRef.current = easingDuration;
-    }, [activeEffects, cursorPositions, easingDuration]);
+        cursorSettingsRef.current = cursorSettings;
+    }, [activeEffects, cursorPositions, easingDuration, cursorSettings]);
 
     // Main animation loop - runs at 60fps using RAF
     useEffect(() => {
@@ -274,6 +282,44 @@ export function VideoPreview({
                 container.style.transform = `translate3d(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%, 0) scale(${currentScale.toFixed(3)})`;
             }
 
+            // Update custom cursor overlay position
+            const cursorEl = cursorOverlayRef.current;
+            const curSettings = cursorSettingsRef.current;
+            if (cursorEl && curSettings.visible && positions.length > 0) {
+                const rawPos = getCursorAtTime(positions, time * 1000, cursorIndexRef);
+                if (rawPos) {
+                    const state = cursorStateRef.current;
+
+                    // Lerp for smooth movement (lower = smoother but laggy)
+                    const smoothing = curSettings.smoothing;
+                    state.x += (rawPos.x - state.x) * smoothing;
+                    state.y += (rawPos.y - state.y) * smoothing;
+
+                    // Calculate velocity (distance per frame, normalized)
+                    const dx = state.x - state.prevX;
+                    const dy = state.y - state.prevY;
+                    const frameVelocity = Math.hypot(dx, dy);
+                    // Smooth velocity over time
+                    state.velocity = state.velocity * 0.8 + frameVelocity * 0.2;
+
+                    state.prevX = state.x;
+                    state.prevY = state.y;
+
+                    // Apply velocity scaling if enabled (subtle effect)
+                    const velocityScale = curSettings.velocityScale
+                        ? 1 + Math.min(state.velocity * 30, 0.5) // Max 1.5x scale
+                        : 1;
+
+                    // Update cursor DOM position directly (bypass React)
+                    cursorEl.style.left = `${(state.x * 100).toFixed(2)}%`;
+                    cursorEl.style.top = `${(state.y * 100).toFixed(2)}%`;
+                    cursorEl.style.transform = `translate(-50%, -50%) scale(${velocityScale.toFixed(2)})`;
+                    cursorEl.style.opacity = '1';
+                }
+            } else if (cursorEl) {
+                cursorEl.style.opacity = '0';
+            }
+
             // Continue loop
             rafIdRef.current = requestAnimationFrame(animate);
         };
@@ -352,6 +398,56 @@ export function VideoPreview({
                             }}
                         />
                     ))}
+
+                    {/* Custom Cursor Overlay - positioned via RAF for 60fps smoothness */}
+                    {cursorSettings.visible && cursorPositions.length > 0 && (
+                        <div
+                            ref={cursorOverlayRef}
+                            className="absolute pointer-events-none"
+                            style={{
+                                left: '50%',
+                                top: '50%',
+                                width: `${cursorSettings.size}px`,
+                                height: `${cursorSettings.size}px`,
+                                opacity: 0,
+                                transition: 'opacity 0.15s ease',
+                            }}
+                        >
+                            {/* SVG Cursor based on style */}
+                            {cursorSettings.style === 'pointer' && (
+                                <svg viewBox="0 0 24 24" fill={cursorSettings.color} className="w-full h-full drop-shadow-lg">
+                                    <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
+                                    <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" stroke="black" strokeWidth="0.5" fill="none" />
+                                </svg>
+                            )}
+                            {cursorSettings.style === 'circle' && (
+                                <svg viewBox="0 0 24 24" className="w-full h-full">
+                                    <circle cx="12" cy="12" r="10" fill={cursorSettings.color} opacity="0.9" />
+                                    <circle cx="12" cy="12" r="10" stroke="black" strokeWidth="0.5" fill="none" />
+                                    <circle cx="12" cy="12" r="3" fill="black" opacity="0.5" />
+                                </svg>
+                            )}
+                            {cursorSettings.style === 'crosshair' && (
+                                <svg viewBox="0 0 24 24" stroke={cursorSettings.color} strokeWidth="2" className="w-full h-full drop-shadow-lg">
+                                    <line x1="12" y1="2" x2="12" y2="22" strokeLinecap="round" />
+                                    <line x1="2" y1="12" x2="22" y2="12" strokeLinecap="round" />
+                                    <circle cx="12" cy="12" r="4" fill="none" />
+                                </svg>
+                            )}
+
+                            {/* Click Ripple Effect (cursor-specific) */}
+                            {cursorSettings.clickRipple && activeRipples.length > 0 && (
+                                <div
+                                    className="absolute inset-0 pointer-events-none"
+                                    style={{
+                                        borderRadius: '50%',
+                                        border: `2px solid ${cursorSettings.color}`,
+                                        animation: 'click-ripple 0.4s ease-out forwards',
+                                    }}
+                                />
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>

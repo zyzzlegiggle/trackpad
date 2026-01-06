@@ -69,4 +69,18 @@ export interface ExportSettings {
 }
 
 // Sidebar tab types
-export type SidebarTab = 'background' | 'export' | 'effects';
+export type SidebarTab = 'background' | 'cursor' | 'export' | 'effects';
+
+// Cursor style options
+export type CursorStyle = 'pointer' | 'circle' | 'crosshair';
+
+// Cursor settings for custom cursor rendering
+export interface CursorSettings {
+    visible: boolean;
+    style: CursorStyle;
+    size: number;           // 16-48px
+    color: string;          // Cursor color
+    smoothing: number;      // 0-1 (lerp factor, higher = smoother)
+    velocityScale: boolean; // Enlarge cursor on fast movement
+    clickRipple: boolean;   // Show ripple effect on clicks
+}

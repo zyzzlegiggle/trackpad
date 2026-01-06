@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Effect, CanvasSettings, ExportSettings, SidebarTab } from './types';
+import { Effect, CanvasSettings, ExportSettings, SidebarTab, CursorSettings } from './types';
 import { formatTimeDetailed } from './utils';
 import { EffectSettings } from './EffectSettings';
-import { RESOLUTION_OPTIONS, FORMAT_OPTIONS, QUALITY_OPTIONS } from './constants';
+import { RESOLUTION_OPTIONS, FORMAT_OPTIONS, QUALITY_OPTIONS, CURSOR_STYLES } from './constants';
 
 // Preset background colors
 const BACKGROUND_PRESETS = [
@@ -21,6 +21,11 @@ const TabIcons = {
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
             <path d="M21 15l-5-5L5 21" />
+        </svg>
+    ),
+    cursor: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
         </svg>
     ),
     export: (
@@ -43,8 +48,10 @@ interface SidebarProps {
     trimStart: number;
     trimEnd: number;
     canvasSettings: CanvasSettings;
+    cursorSettings: CursorSettings;
     exportSettings: ExportSettings;
     onCanvasSettingsChange: (settings: Partial<CanvasSettings>) => void;
+    onCursorSettingsChange: (settings: Partial<CursorSettings>) => void;
     onExportSettingsChange: (settings: Partial<ExportSettings>) => void;
     onExport: () => void;
     onSaveOriginal: () => void;
@@ -58,8 +65,10 @@ export function Sidebar({
     trimStart,
     trimEnd,
     canvasSettings,
+    cursorSettings,
     exportSettings,
     onCanvasSettingsChange,
+    onCursorSettingsChange,
     onExportSettingsChange,
     onExport,
     onSaveOriginal,
@@ -69,6 +78,7 @@ export function Sidebar({
 
     const tabs: { id: SidebarTab; icon: React.ReactNode; label: string }[] = [
         { id: 'background', icon: TabIcons.background, label: 'Background' },
+        { id: 'cursor', icon: TabIcons.cursor, label: 'Cursor' },
         { id: 'export', icon: TabIcons.export, label: 'Export' },
         { id: 'effects', icon: TabIcons.effects, label: 'Effects' },
     ];
@@ -116,6 +126,12 @@ export function Sidebar({
                         <BackgroundTab
                             canvasSettings={canvasSettings}
                             onCanvasSettingsChange={onCanvasSettingsChange}
+                        />
+                    )}
+                    {activeTab === 'cursor' && (
+                        <CursorTab
+                            cursorSettings={cursorSettings}
+                            onCursorSettingsChange={onCursorSettingsChange}
                         />
                     )}
                     {activeTab === 'export' && (
@@ -233,6 +249,137 @@ function BackgroundTab({
                 />
                 <span className="text-xs text-gray-600 font-medium">Show click ripples</span>
             </label>
+        </div>
+    );
+}
+
+// Cursor Tab Content
+function CursorTab({
+    cursorSettings,
+    onCursorSettingsChange,
+}: {
+    cursorSettings: CursorSettings;
+    onCursorSettingsChange: (settings: Partial<CursorSettings>) => void;
+}) {
+    return (
+        <div className="flex flex-col gap-5">
+            <h3 className="text-sm font-semibold m-0 text-gray-900">Cursor</h3>
+
+            {/* Cursor Visibility Toggle */}
+            <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={cursorSettings.visible}
+                    onChange={(e) => onCursorSettingsChange({ visible: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-xs text-gray-600 font-medium">Show custom cursor</span>
+            </label>
+
+            {cursorSettings.visible && (
+                <>
+                    {/* Cursor Style */}
+                    <div className="flex flex-col gap-2">
+                        <label className="text-xs text-gray-600 font-medium">Style</label>
+                        <div className="flex gap-2">
+                            {CURSOR_STYLES.map((style) => (
+                                <button
+                                    key={style.value}
+                                    onClick={() => onCursorSettingsChange({ style: style.value })}
+                                    className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150 ${cursorSettings.style === style.value
+                                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                >
+                                    {style.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Cursor Size */}
+                    <div className="flex flex-col gap-2">
+                        <label className="text-xs text-gray-600 font-medium">Size</label>
+                        <div className="flex items-center gap-2.5">
+                            <input
+                                type="range"
+                                min="16"
+                                max="48"
+                                step="4"
+                                value={cursorSettings.size}
+                                onChange={(e) => onCursorSettingsChange({ size: parseInt(e.target.value) })}
+                                className="flex-1"
+                            />
+                            <span className="text-xs text-gray-900 font-medium min-w-10 text-right">{cursorSettings.size}px</span>
+                        </div>
+                    </div>
+
+                    {/* Cursor Color */}
+                    <div className="flex flex-col gap-2">
+                        <label className="text-xs text-gray-600 font-medium">Color</label>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="color"
+                                value={cursorSettings.color}
+                                onChange={(e) => onCursorSettingsChange({ color: e.target.value })}
+                                className="w-8 h-8 rounded cursor-pointer border border-gray-200"
+                            />
+                            <input
+                                type="text"
+                                value={cursorSettings.color}
+                                onChange={(e) => onCursorSettingsChange({ color: e.target.value })}
+                                className="flex-1 px-2 py-1 text-xs font-mono border border-gray-200 rounded"
+                                placeholder="#ffffff"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Smoothing */}
+                    <div className="flex flex-col gap-2">
+                        <label className="text-xs text-gray-600 font-medium">Smoothing</label>
+                        <div className="flex items-center gap-2.5">
+                            <input
+                                type="range"
+                                min="0.05"
+                                max="0.5"
+                                step="0.05"
+                                value={cursorSettings.smoothing}
+                                onChange={(e) => onCursorSettingsChange({ smoothing: parseFloat(e.target.value) })}
+                                className="flex-1"
+                            />
+                            <span className="text-xs text-gray-900 font-medium min-w-12 text-right">
+                                {(cursorSettings.smoothing * 100).toFixed(0)}%
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-400">Higher = smoother cursor movement</p>
+                    </div>
+
+                    <div className="h-px bg-gray-200" />
+
+                    {/* Effects Toggles */}
+                    <div className="flex flex-col gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={cursorSettings.velocityScale}
+                                onChange={(e) => onCursorSettingsChange({ velocityScale: e.target.checked })}
+                                className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="text-xs text-gray-600 font-medium">Scale on fast movement</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={cursorSettings.clickRipple}
+                                onChange={(e) => onCursorSettingsChange({ clickRipple: e.target.checked })}
+                                className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="text-xs text-gray-600 font-medium">Click ripple effect</span>
+                        </label>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
