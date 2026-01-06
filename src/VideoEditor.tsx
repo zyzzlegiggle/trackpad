@@ -539,7 +539,21 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     target_y: e.targetY || 0.5,
                 }));
 
-            if (zoomEffects.length > 0) {
+            // Prepare cursor data for export
+            const cursorExportData = cursorSettings.visible && cursorPositions.length > 0 ? {
+                cursorPositions: cursorPositions.map(p => ({
+                    timestamp_ms: p.timestamp_ms,
+                    x: p.x,
+                    y: p.y,
+                })),
+                cursorSettings: {
+                    visible: cursorSettings.visible,
+                    size: cursorSettings.size,
+                    color: cursorSettings.color.replace('#', ''),
+                },
+            } : {};
+
+            if (zoomEffects.length > 0 || cursorSettings.visible) {
                 // Export with effects (slower, re-encodes)
                 setExportStatus("Applying effects...");
                 await invoke("export_with_effects", {
@@ -548,10 +562,11 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     trimStart,
                     trimEnd,
                     effects: zoomEffects,
-                    backgroundColor: canvasSettings.backgroundColor.replace('#', ''),  // Pass color without # prefix
+                    backgroundColor: canvasSettings.backgroundColor.replace('#', ''),
+                    ...cursorExportData,
                 });
             } else {
-                // Fast export (no effects)
+                // Fast export (no effects, no cursor)
                 await invoke("trim_video", {
                     inputPath,
                     outputPath,

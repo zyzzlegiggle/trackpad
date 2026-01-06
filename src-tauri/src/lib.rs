@@ -98,6 +98,106 @@ struct CursorExportSettings {
     color: String,   // Hex color without #
 }
 
+// Build cursor filter for FFmpeg - generates drawbox commands for cursor positions
+// First Principles: FFmpeg can't iterate arrays, so we generate time-segmented drawbox filters
+fn build_cursor_filter(
+    cursor_positions: &Option<Vec<CursorFrame>>,
+    cursor_settings: &Option<CursorExportSettings>,
+    width: i32,
+    height: i32,
+    base_scale: f64,
+    trim_start: f64,
+    _duration: f64,
+    base_filter: String,
+) -> String {
+    // If no cursor settings or not visible, just return base filter with rename
+    let settings = match cursor_settings {
+        Some(s) if s.visible => s,
+        _ => return format!("{};[out]copy[final]", base_filter),
+    };
+    
+    let positions = match cursor_positions {
+        Some(p) if !p.is_empty() => p,
+        _ => return format!("{};[out]copy[final]", base_filter),
+    };
+    
+    println!("Building cursor filter for {} positions", positions.len());
+    
+    let cursor_size = settings.size;
+    let cursor_color = &settings.color;
+    
+    // Calculate video offset in canvas (video is centered with base_scale)
+    let margin = (1.0 - base_scale) / 2.0;
+    let video_offset_x = (margin * width as f64) as i32;
+    let video_offset_y = (margin * height as f64) as i32;
+    let video_w = (width as f64 * base_scale) as i32;
+    let video_h = (height as f64 * base_scale) as i32;
+    
+    // Build drawbox filter chain
+    // Strategy: For each pair of adjacent cursor positions, draw cursor for that time segment
+    // FFmpeg drawbox with enable='between(t,start,end)' and x/y as linear interpolation
+    
+    // Limit number of drawbox filters to avoid FFmpeg filter graph limit
+    // Sample every Nth position if too many
+    let max_segments = 500;
+    let step = (positions.len() / max_segments).max(1);
+    
+    let mut drawbox_chain = String::new();
+    let mut filter_count = 0;
+    
+    for i in (0..positions.len().saturating_sub(1)).step_by(step) {
+        let p1 = &positions[i];
+        let p2 = &positions[(i + step).min(positions.len() - 1)];
+        
+        // Convert timestamps to seconds relative to trim
+        let t1 = (p1.timestamp_ms as f64 / 1000.0) - trim_start;
+        let t2 = (p2.timestamp_ms as f64 / 1000.0) - trim_start;
+        
+        // Skip if outside valid range
+        if t2 < 0.0 || t1 < 0.0 {
+            continue;
+        }
+        
+        // Calculate pixel positions (cursor position is in video coords, need canvas coords)
+        // Canvas position = video_offset + cursor_norm * video_size
+        let x1 = video_offset_x + (p1.x * video_w as f64) as i32;
+        let y1 = video_offset_y + (p1.y * video_h as f64) as i32;
+        let x2 = video_offset_x + (p2.x * video_w as f64) as i32;
+        let y2 = video_offset_y + (p2.y * video_h as f64) as i32;
+        
+        // For simplicity, draw at interpolated position using enable
+        // FFmpeg doesn't support dynamic x/y in drawbox, so we use center of segment
+        let x_center = (x1 + x2) / 2 - cursor_size / 2;
+        let y_center = (y1 + y2) / 2 - cursor_size / 2;
+        
+        // Clamp to valid range
+        let x_clamped = x_center.max(0).min(width - cursor_size);
+        let y_clamped = y_center.max(0).min(height - cursor_size);
+        
+        // Add drawbox filter
+        let enable = format!("between(t,{:.3},{:.3})", t1, t2);
+        let drawbox = format!(
+            "drawbox=x={}:y={}:w={}:h={}:c=0x{}@0.9:t=fill:enable='{}'",
+            x_clamped, y_clamped, cursor_size, cursor_size, cursor_color, enable
+        );
+        
+        if drawbox_chain.is_empty() {
+            drawbox_chain = drawbox;
+        } else {
+            drawbox_chain = format!("{},{}", drawbox_chain, drawbox);
+        }
+        filter_count += 1;
+    }
+    
+    println!("Generated {} cursor drawbox filters", filter_count);
+    
+    if drawbox_chain.is_empty() {
+        format!("{};[out]copy[final]", base_filter)
+    } else {
+        format!("{};[out]{}[final]", base_filter, drawbox_chain)
+    }
+}
+
 #[tauri::command]
 async fn export_with_effects(
     input_path: String,
@@ -282,10 +382,22 @@ async fn export_with_effects(
         
         println!("Filter: {}", filter);
         
+        // Add cursor filter if positions available
+        let final_filter = build_cursor_filter(
+            &cursor_positions,
+            &cursor_settings,
+            width,
+            height,
+            base_scale,
+            trim_start,
+            duration,
+            filter,
+        );
+        
         args.push("-filter_complex".to_string());
-        args.push(filter);
+        args.push(final_filter);
         args.push("-map".to_string());
-        args.push("[out]".to_string());
+        args.push("[final]".to_string());
     } else {
         // No effects - just apply base scale with background
         let filter = format!(
@@ -301,10 +413,22 @@ async fn export_with_effects(
         
         println!("Filter (no effects): {}", filter);
         
+        // Add cursor filter if positions available
+        let final_filter = build_cursor_filter(
+            &cursor_positions,
+            &cursor_settings,
+            width,
+            height,
+            base_scale,
+            trim_start,
+            duration,
+            filter,
+        );
+        
         args.push("-filter_complex".to_string());
-        args.push(filter);
+        args.push(final_filter);
         args.push("-map".to_string());
-        args.push("[out]".to_string());
+        args.push("[final]".to_string());
     }
     
     // Encoding options - optimized for quality and smooth playback
