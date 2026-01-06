@@ -31,3 +31,30 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
     cursorSize: 2,  // Medium by default
 };
 
+// Export resolution options
+export const RESOLUTION_OPTIONS = [
+    { value: 'original', label: 'Original' },
+    { value: '4k', label: '4K (2160p)' },
+    { value: '1080p', label: 'Full HD (1080p)' },
+    { value: '720p', label: 'HD (720p)' },
+] as const;
+
+// Export format options
+export const FORMAT_OPTIONS = [
+    { value: 'mp4', label: 'MP4' },
+    { value: 'webm', label: 'WebM' },
+] as const;
+
+// Export quality options
+export const QUALITY_OPTIONS = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+] as const;
+
+// Default export settings
+export const DEFAULT_EXPORT_SETTINGS = {
+    resolution: 'original' as const,
+    format: 'mp4' as const,
+    quality: 'high' as const,
+};

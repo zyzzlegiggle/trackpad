@@ -5,8 +5,10 @@ import {
     Effect,
     EffectType,
     CanvasSettings,
+    ExportSettings,
     EFFECT_CONFIG,
     DEFAULT_CANVAS_SETTINGS,
+    DEFAULT_EXPORT_SETTINGS,
     rangesOverlap,
     formatTimeDetailed,
     generateTimeMarkers,
@@ -46,9 +48,17 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
     // Canvas settings (background, border radius, padding, click ripples)
     const [canvasSettings, setCanvasSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
 
+    // Export settings (resolution, format, quality)
+    const [exportSettings, setExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
+
     // Update canvas settings helper
     const updateCanvasSettings = (updates: Partial<CanvasSettings>) => {
         setCanvasSettings(prev => ({ ...prev, ...updates }));
+    };
+
+    // Update export settings helper
+    const updateExportSettings = (updates: Partial<ExportSettings>) => {
+        setExportSettings(prev => ({ ...prev, ...updates }));
     };
 
     const videoUrl = convertFileSrc(videoPath);
@@ -675,7 +685,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 trimStart={trimStart}
                 trimEnd={trimEnd}
                 canvasSettings={canvasSettings}
+                exportSettings={exportSettings}
                 onCanvasSettingsChange={updateCanvasSettings}
+                onExportSettingsChange={updateExportSettings}
                 onExport={handleExport}
                 onSaveOriginal={handleSaveOriginal}
                 onEffectUpdate={updateEffect}

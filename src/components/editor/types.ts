@@ -58,3 +58,17 @@ export interface EffectConfig {
     color: string;
     defaultDuration: number;
 }
+
+// Export settings
+export type ExportResolution = '720p' | '1080p' | '4k' | 'original';
+export type ExportFormat = 'mp4' | 'webm';
+export type ExportQuality = 'low' | 'medium' | 'high';
+
+export interface ExportSettings {
+    resolution: ExportResolution;
+    format: ExportFormat;
+    quality: ExportQuality;
+}
+
+// Sidebar tab types
+export type SidebarTab = 'background' | 'cursor' | 'export' | 'effects';
