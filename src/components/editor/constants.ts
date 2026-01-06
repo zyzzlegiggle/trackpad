@@ -14,21 +14,12 @@ export const ZOOM_EASING_PRESETS: Record<EasingPreset, { duration: number; label
     rapid: { duration: 0.1, label: 'Rapid' },
 };
 
-// Cursor size options in pixels
-export const CURSOR_SIZES: Record<number, number> = {
-    1: 20,   // Small
-    2: 32,   // Medium
-    3: 44,   // Large
-};
-
 // Default canvas settings
 export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
     backgroundColor: '#1a1a2e',
     borderRadius: 12,
     paddingPercent: 5,
-    clickRippleEnabled: false,  // Disabled by default
-    showCursor: true,
-    cursorSize: 2,  // Medium by default
+    clickRippleEnabled: false,
 };
 
 // Export resolution options

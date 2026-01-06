@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Effect, CanvasSettings, ExportSettings, SidebarTab } from './types';
 import { formatTimeDetailed } from './utils';
 import { EffectSettings } from './EffectSettings';
-import { CURSOR_SIZES, RESOLUTION_OPTIONS, FORMAT_OPTIONS, QUALITY_OPTIONS } from './constants';
+import { RESOLUTION_OPTIONS, FORMAT_OPTIONS, QUALITY_OPTIONS } from './constants';
 
 // Preset background colors
 const BACKGROUND_PRESETS = [
@@ -21,11 +21,6 @@ const TabIcons = {
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
             <path d="M21 15l-5-5L5 21" />
-        </svg>
-    ),
-    cursor: (
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
         </svg>
     ),
     export: (
@@ -74,7 +69,6 @@ export function Sidebar({
 
     const tabs: { id: SidebarTab; icon: React.ReactNode; label: string }[] = [
         { id: 'background', icon: TabIcons.background, label: 'Background' },
-        { id: 'cursor', icon: TabIcons.cursor, label: 'Cursor' },
         { id: 'export', icon: TabIcons.export, label: 'Export' },
         { id: 'effects', icon: TabIcons.effects, label: 'Effects' },
     ];
@@ -107,8 +101,8 @@ export function Sidebar({
                             onClick={() => setActiveTab(tab.id)}
                             title={tab.label}
                             className={`w-10 h-10 mx-auto mb-1 rounded-lg flex items-center justify-center transition-all duration-200 ${activeTab === tab.id
-                                    ? 'bg-indigo-100 text-indigo-600'
-                                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                ? 'bg-indigo-100 text-indigo-600'
+                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
                                 }`}
                         >
                             {tab.icon}
@@ -120,12 +114,6 @@ export function Sidebar({
                 <div className="flex-1 overflow-y-auto p-4">
                     {activeTab === 'background' && (
                         <BackgroundTab
-                            canvasSettings={canvasSettings}
-                            onCanvasSettingsChange={onCanvasSettingsChange}
-                        />
-                    )}
-                    {activeTab === 'cursor' && (
-                        <CursorTab
                             canvasSettings={canvasSettings}
                             onCanvasSettingsChange={onCanvasSettingsChange}
                         />
@@ -171,8 +159,8 @@ function BackgroundTab({
                         key={preset.color}
                         title={preset.name}
                         className={`w-full aspect-square rounded-md border-2 transition-all duration-200 hover:scale-105 ${canvasSettings.backgroundColor === preset.color
-                                ? 'border-indigo-500 ring-2 ring-indigo-200'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-indigo-500 ring-2 ring-indigo-200'
+                            : 'border-gray-200 hover:border-gray-300'
                             }`}
                         style={{ backgroundColor: preset.color }}
                         onClick={() => onCanvasSettingsChange({ backgroundColor: preset.color })}
@@ -249,56 +237,6 @@ function BackgroundTab({
     );
 }
 
-// Cursor Tab Content
-function CursorTab({
-    canvasSettings,
-    onCanvasSettingsChange,
-}: {
-    canvasSettings: CanvasSettings;
-    onCanvasSettingsChange: (settings: Partial<CanvasSettings>) => void;
-}) {
-    return (
-        <div className="flex flex-col gap-5">
-            <h3 className="text-sm font-semibold m-0 text-gray-900">Cursor</h3>
-
-            {/* Cursor Overlay Toggle */}
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                    type="checkbox"
-                    checked={canvasSettings.showCursor}
-                    onChange={(e) => onCanvasSettingsChange({ showCursor: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-xs text-gray-600 font-medium">Show cursor overlay</span>
-            </label>
-
-            {/* Cursor Size (only show if cursor is enabled) */}
-            {canvasSettings.showCursor && (
-                <div className="flex flex-col gap-2">
-                    <label className="text-xs text-gray-600 font-medium">Cursor Size</label>
-                    <div className="flex items-center gap-2">
-                        {[1, 2, 3].map((size) => (
-                            <button
-                                key={size}
-                                className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150 ${canvasSettings.cursorSize === size
-                                        ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                                    }`}
-                                onClick={() => onCanvasSettingsChange({ cursorSize: size })}
-                            >
-                                {size === 1 ? 'Small' : size === 2 ? 'Medium' : 'Large'}
-                            </button>
-                        ))}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">
-                        Size: {CURSOR_SIZES[canvasSettings.cursorSize]}px
-                    </p>
-                </div>
-            )}
-        </div>
-    );
-}
-
 // Export Tab Content
 function ExportTab({
     exportSettings,
@@ -342,8 +280,8 @@ function ExportTab({
                             key={opt.value}
                             onClick={() => onExportSettingsChange({ format: opt.value })}
                             className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150 ${exportSettings.format === opt.value
-                                    ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
                                 }`}
                         >
                             {opt.label}
@@ -361,8 +299,8 @@ function ExportTab({
                             key={opt.value}
                             onClick={() => onExportSettingsChange({ quality: opt.value })}
                             className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150 ${exportSettings.quality === opt.value
-                                    ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
                                 }`}
                         >
                             {opt.label}
