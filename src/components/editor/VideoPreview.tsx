@@ -1,6 +1,6 @@
 import { RefObject, useMemo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { Effect, CursorPosition, ClickEvent, CanvasSettings, EasingPreset } from './types';
-import { ZOOM_EASING_PRESETS } from './constants';
+import { ZOOM_EASING_PRESETS, CURSOR_SIZES } from './constants';
 
 interface VideoPreviewProps {
     videoUrl: string;
@@ -110,6 +110,9 @@ export function VideoPreview({
     // Ref for direct DOM manipulation - bypasses React reconciliation for 60fps
     const zoomContainerRef = useRef<HTMLDivElement>(null);
 
+    // Ref for cursor overlay - direct DOM manipulation for performance
+    const cursorOverlayRef = useRef<HTMLDivElement>(null);
+
     // Active ripples for click animation
     const [activeRipples, setActiveRipples] = useState<RippleState[]>([]);
     const lastProcessedClickRef = useRef<number>(-1);
@@ -170,7 +173,11 @@ export function VideoPreview({
 
     // PERFORMANCE: Use useLayoutEffect + direct DOM manipulation for 60fps
     // This bypasses React's reconciliation, updating the DOM directly
-    // This is how professional tools like Cursorful/Screen Studio achieve smooth animations
+    // This is how professional tools achieve smooth animations
+
+    // Persist viewport position between frames for smooth camera movement
+    const viewportRef = useRef({ x: 0.5, y: 0.5, lastEffectId: '' });
+
     useLayoutEffect(() => {
         const container = zoomContainerRef.current;
         if (!container) return;
@@ -179,10 +186,11 @@ export function VideoPreview({
         const ZOOM_SCALE = zoomEffect?.scale || 3.0;
         const ZOOM_TRANSITION_TIME = easingDuration;
 
-        // No zoom effect - set default state with transition
+        // No zoom effect - reset and set default state with transition
         if (!zoomEffect) {
             container.style.transform = 'scale(1) translate(0%, 0%)';
             container.style.transition = 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+            viewportRef.current = { x: 0.5, y: 0.5, lastEffectId: '' };
             return;
         }
 
@@ -192,33 +200,42 @@ export function VideoPreview({
         const timeInEffect = currentTime - zoomEffect.startTime;
         const timeToEnd = zoomEffect.endTime - currentTime;
 
-        // Initial target
-        let viewportCenterX = zoomEffect.targetX ?? 0.5;
-        let viewportCenterY = zoomEffect.targetY ?? 0.5;
+        // Initialize viewport from effect target if this is a new effect
+        if (viewportRef.current.lastEffectId !== zoomEffect.id) {
+            viewportRef.current = {
+                x: zoomEffect.targetX ?? 0.5,
+                y: zoomEffect.targetY ?? 0.5,
+                lastEffectId: zoomEffect.id,
+            };
+        }
 
-        // Only do cursor lookup during hold phase
+        // Get current viewport position (persisted between frames)
+        let viewportX = viewportRef.current.x;
+        let viewportY = viewportRef.current.y;
+
+        // Calculate target position based on cursor (during hold phase)
         if (cursorPositions.length > 0 && timeInEffect > ZOOM_TRANSITION_TIME && timeToEnd > ZOOM_TRANSITION_TIME) {
             const cursorPos = getCursorAtTime(cursorPositions, currentTime * 1000, cursorIndexRef);
 
             if (cursorPos) {
-                const visibleRange = 1 / ZOOM_SCALE / 2;
-                const margin = visibleRange * 0.8;
+                // First principles: Direct cursor following with lerp smoothing
+                // Target = cursor position, but lerp toward it for smooth movement
 
-                const cursorOffsetX = cursorPos.x - viewportCenterX;
-                const cursorOffsetY = cursorPos.y - viewportCenterY;
+                const SMOOTHING = 0.08; // Lower = smoother but slower response
 
-                if (Math.abs(cursorOffsetX) > margin) {
-                    viewportCenterX += cursorOffsetX > 0 ? cursorOffsetX - margin : cursorOffsetX + margin;
-                }
-                if (Math.abs(cursorOffsetY) > margin) {
-                    viewportCenterY += cursorOffsetY > 0 ? cursorOffsetY - margin : cursorOffsetY + margin;
-                }
+                // Lerp viewport toward cursor position
+                viewportX += (cursorPos.x - viewportX) * SMOOTHING;
+                viewportY += (cursorPos.y - viewportY) * SMOOTHING;
 
-                // Clamp
+                // Clamp viewport to valid range (keep content visible)
                 const minCenter = 1 / ZOOM_SCALE / 2;
                 const maxCenter = 1 - minCenter;
-                viewportCenterX = Math.max(minCenter, Math.min(maxCenter, viewportCenterX));
-                viewportCenterY = Math.max(minCenter, Math.min(maxCenter, viewportCenterY));
+                viewportX = Math.max(minCenter, Math.min(maxCenter, viewportX));
+                viewportY = Math.max(minCenter, Math.min(maxCenter, viewportY));
+
+                // Persist for next frame
+                viewportRef.current.x = viewportX;
+                viewportRef.current.y = viewportY;
             }
         }
 
@@ -235,8 +252,8 @@ export function VideoPreview({
         }
 
         const currentScale = 1 + (ZOOM_SCALE - 1) * zoomIntensity;
-        const translateX = (0.5 - viewportCenterX) * (currentScale - 1) * 100;
-        const translateY = (0.5 - viewportCenterY) * (currentScale - 1) * 100;
+        const translateX = (0.5 - viewportX) * (currentScale - 1) * 100;
+        const translateY = (0.5 - viewportY) * (currentScale - 1) * 100;
 
         // Direct DOM update - no React re-render!
         container.style.transform = `scale(${currentScale.toFixed(3)}) translate(${translateX.toFixed(1)}%, ${translateY.toFixed(1)}%)`;
@@ -251,6 +268,28 @@ export function VideoPreview({
             transition: 'filter 0.3s ease',
         };
     }, [activeEffects]);
+
+    // Cursor overlay position update - direct DOM manipulation for 60fps
+    useLayoutEffect(() => {
+        const cursor = cursorOverlayRef.current;
+        if (!cursor || !canvasSettings.showCursor || cursorPositions.length === 0) {
+            if (cursor) cursor.style.opacity = '0';
+            return;
+        }
+
+        const cursorPos = getCursorAtTime(cursorPositions, currentTime * 1000, cursorIndexRef);
+        if (!cursorPos) {
+            cursor.style.opacity = '0';
+            return;
+        }
+
+        // GPU-accelerated transform for smooth positioning
+        cursor.style.opacity = '1';
+        cursor.style.transform = `translate(-50%, -50%) translate(${cursorPos.x * 100}%, ${cursorPos.y * 100}%)`;
+    }, [currentTime, cursorPositions, canvasSettings.showCursor]);
+
+    // Get cursor size in pixels
+    const cursorSizePx = CURSOR_SIZES[canvasSettings.cursorSize] || CURSOR_SIZES[2];
 
     return (
         <div className="relative flex-1 min-h-0 bg-gray-900 rounded-xl overflow-hidden flex flex-col">
@@ -305,6 +344,33 @@ export function VideoPreview({
                             }}
                         />
                     ))}
+
+                    {/* Cursor Overlay - visible cursor following recorded positions */}
+                    {canvasSettings.showCursor && cursorPositions.length > 0 && (
+                        <div
+                            ref={cursorOverlayRef}
+                            className="absolute top-0 left-0 pointer-events-none z-20"
+                            style={{
+                                width: `${cursorSizePx}px`,
+                                height: `${cursorSizePx}px`,
+                                willChange: 'transform',
+                                opacity: 0, // Initial state, updated via useLayoutEffect
+                            }}
+                        >
+                            {/* Outer ring */}
+                            <div
+                                className="absolute inset-0 rounded-full border-2 border-white shadow-lg"
+                                style={{
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.1)',
+                                }}
+                            />
+                            {/* Inner dot */}
+                            <div
+                                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full"
+                                style={{ boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }}
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
             <div className="absolute top-0 left-0 right-0 bottom-12 flex items-center justify-center cursor-pointer" onClick={onTogglePlay}>

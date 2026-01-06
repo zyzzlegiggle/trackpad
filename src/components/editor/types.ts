@@ -32,6 +32,8 @@ export interface CanvasSettings {
     borderRadius: number;      // 0-32px
     paddingPercent: number;    // 0-20%
     clickRippleEnabled: boolean;
+    showCursor: boolean;       // Show cursor overlay
+    cursorSize: number;        // 1-3 (small/medium/large)
 }
 
 // Unified effect interface with lane support

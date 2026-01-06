@@ -289,11 +289,13 @@ async fn export_with_effects(
         args.push("[out]".to_string());
     }
     
-    // Encoding options
+    // Encoding options - optimized for quality and smooth playback
     args.extend([
         "-c:v".to_string(), "libx264".to_string(),
-        "-preset".to_string(), "fast".to_string(),
-        "-crf".to_string(), "18".to_string(),
+        "-preset".to_string(), "medium".to_string(),  // Better quality than fast
+        "-crf".to_string(), "16".to_string(),         // Higher quality (lower = better)
+        "-r".to_string(), "60".to_string(),           // Force 60fps output
+        "-pix_fmt".to_string(), "yuv420p".to_string(), // Ensure compatibility
         "-c:a".to_string(), "aac".to_string(),
         "-b:a".to_string(), "192k".to_string(),
         output_path.clone(),

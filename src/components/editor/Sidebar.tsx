@@ -145,6 +145,38 @@ export function Sidebar({
                     />
                     <span className="text-xs text-gray-600 font-medium">Show click ripples</span>
                 </label>
+
+                {/* Cursor Overlay Toggle */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={canvasSettings.showCursor}
+                        onChange={(e) => onCanvasSettingsChange({ showCursor: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs text-gray-600 font-medium">Show cursor overlay</span>
+                </label>
+
+                {/* Cursor Size (only show if cursor is enabled) */}
+                {canvasSettings.showCursor && (
+                    <div className="flex flex-col gap-1.5 ml-6">
+                        <label className="text-xs text-gray-600 font-medium">Cursor Size</label>
+                        <div className="flex items-center gap-2">
+                            {[1, 2, 3].map((size) => (
+                                <button
+                                    key={size}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md border transition-all duration-150 ${canvasSettings.cursorSize === size
+                                            ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
+                                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    onClick={() => onCanvasSettingsChange({ cursorSize: size })}
+                                >
+                                    {size === 1 ? 'S' : size === 2 ? 'M' : 'L'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="h-px bg-gray-200" />
