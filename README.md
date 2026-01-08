@@ -1,4 +1,4 @@
-# Video Recorder - Desktop Screen Capture
+# Trackpad
 
 A lightweight, high-performance desktop video recorder with built-in video editing capabilities. Built with Tauri, React, and Rust for minimal resource usage and native performance.
 
