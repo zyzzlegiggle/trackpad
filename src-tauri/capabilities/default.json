@@ -3,10 +3,20 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": [
-    "main"
+    "main",
+    "overlay"
   ],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-set-resizable",
+    "core:window:allow-set-size",
+    "core:window:allow-set-decorations",
+    "core:window:allow-set-shadow",
+    "core:window:allow-center",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize"
   ]
 }
