@@ -1,5 +1,5 @@
 [package]
-name = "video-recorder"
+name = "trackpad"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]

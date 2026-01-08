@@ -78,7 +78,7 @@ Saved videos are stored in your Videos folder (`C:\Users\<username>\Videos`).
 ## Project Structure
 
 ```
-video-recorder/
+trackpad/
 ├── src/                    # React frontend
 │   ├── App.tsx            # Main recorder UI
 │   ├── VideoEditor.tsx    # Built-in video editor
