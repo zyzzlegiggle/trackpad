@@ -18,6 +18,7 @@
         "height": 400,
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "alwaysOnTop": true,
         "center": true,
         "resizable": false
