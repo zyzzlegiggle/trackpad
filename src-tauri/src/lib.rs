@@ -312,7 +312,8 @@ fn build_cursor_filter(
     // FFmpeg overlay supports 'x' and 'y' expressions evaluated per frame
     
     // Sample positions to avoid expression length limits
-    let max_keyframes = 200;
+    // Reduced from 200 to 100 for simpler expressions and faster export
+    let max_keyframes = 100;
     let step = (positions.len() / max_keyframes).max(1);
     
     // Build x and y position expressions as nested if() statements
@@ -383,6 +384,78 @@ fn build_interpolation_expr(keyframes: &[(f64, f64)]) -> String {
     expr
 }
 
+// Export settings struct for quality/resolution/format
+#[derive(serde::Deserialize, Debug, Clone)]
+struct ExportOptions {
+    resolution: Option<String>,  // "720p", "1080p", "4k", "original"
+    quality: Option<String>,     // "low", "medium", "high"
+    format: Option<String>,      // "mp4", "webm"
+}
+
+// Check if hardware encoder is available
+fn detect_hardware_encoder() -> Option<String> {
+    // Try NVENC first (NVIDIA)
+    let nvenc_test = Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output();
+    
+    if let Ok(output) = nvenc_test {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains("h264_nvenc") {
+            println!("Hardware encoder detected: NVENC");
+            return Some("h264_nvenc".to_string());
+        }
+        if stdout.contains("h264_qsv") {
+            println!("Hardware encoder detected: QuickSync");
+            return Some("h264_qsv".to_string());
+        }
+        if stdout.contains("h264_amf") {
+            println!("Hardware encoder detected: AMF (AMD)");
+            return Some("h264_amf".to_string());
+        }
+    }
+    
+    println!("No hardware encoder detected, using libx264");
+    None
+}
+
+// Get encoding parameters based on quality setting
+fn get_encoding_params(quality: &str, hw_encoder: &Option<String>) -> (String, String, String) {
+    // Returns (encoder, preset, crf/quality)
+    match hw_encoder {
+        Some(encoder) => {
+            // Hardware encoder parameters
+            let (preset, qp) = match quality {
+                "high" => ("p7", "18"),    // Highest quality, slower
+                "medium" => ("p4", "23"),  // Balanced
+                "low" => ("p1", "28"),     // Fast, lower quality
+                _ => ("p4", "23"),
+            };
+            (encoder.clone(), preset.to_string(), qp.to_string())
+        }
+        None => {
+            // Software encoder (libx264)
+            let (preset, crf) = match quality {
+                "high" => ("slower", "16"),     // Best quality
+                "medium" => ("medium", "20"),   // Balanced
+                "low" => ("fast", "26"),        // Fast encode
+                _ => ("medium", "20"),
+            };
+            ("libx264".to_string(), preset.to_string(), crf.to_string())
+        }
+    }
+}
+
+// Get target resolution dimensions
+fn get_target_resolution(resolution: &str, orig_width: i32, orig_height: i32) -> (i32, i32) {
+    match resolution {
+        "720p" => (1280, 720),
+        "1080p" => (1920, 1080),
+        "4k" => (3840, 2160),
+        _ => (orig_width, orig_height),  // "original" or unknown
+    }
+}
+
 #[tauri::command]
 async fn export_with_effects(
     input_path: String,
@@ -393,9 +466,18 @@ async fn export_with_effects(
     background_color: Option<String>,
     cursor_positions: Option<Vec<CursorFrame>>,
     cursor_settings: Option<CursorExportSettings>,
+    resolution: Option<String>,
+    quality: Option<String>,
+    format: Option<String>,
 ) -> Result<String, String> {
     let duration = trim_end - trim_start;
     let bg_color = background_color.unwrap_or_else(|| "1a1a2e".to_string());
+    let quality_setting = quality.unwrap_or_else(|| "high".to_string());
+    let resolution_setting = resolution.unwrap_or_else(|| "original".to_string());
+    let _format_setting = format.unwrap_or_else(|| "mp4".to_string());
+    
+    // Detect hardware encoder once at export start
+    let hw_encoder = detect_hardware_encoder();
     
     println!("=== EXPORT WITH EFFECTS (Zoomed-Out Canvas) ===");
     println!("Input: {}", input_path);
@@ -616,34 +698,106 @@ async fn export_with_effects(
         args.push("[final]".to_string());
     }
     
-    // Encoding options - optimized for quality and smooth playback
-    args.extend([
-        "-c:v".to_string(), "libx264".to_string(),
-        "-preset".to_string(), "medium".to_string(),  // Better quality than fast
-        "-crf".to_string(), "16".to_string(),         // Higher quality (lower = better)
-        "-r".to_string(), "60".to_string(),           // Force 60fps output
-        "-pix_fmt".to_string(), "yuv420p".to_string(), // Ensure compatibility
+    // Get encoding parameters based on quality setting and hardware availability
+    let (mut encoder, mut preset, mut crf_or_qp) = get_encoding_params(&quality_setting, &hw_encoder);
+    
+    // Get target resolution
+    let (target_width, target_height) = get_target_resolution(&resolution_setting, width, height);
+    
+    // Add resolution scaling to the filter chain if needed
+    // The previous blocks (effects/no-effects) pushed: -filter_complex, FILTER, -map, [final]
+    // We need to pop them to append our scaling filter
+    
+    args.pop(); // Remove [final]
+    args.pop(); // Remove -map
+    let mut filter_chain = args.pop().expect("Failed to retrieve filter chain"); // Remove final_filter
+    args.pop(); // Remove -filter_complex
+    
+    // Append scaling if needed
+    if target_width != width || target_height != height {
+        filter_chain = format!("{};[final]scale={}:{}:flags=lanczos[scaled]", filter_chain, target_width, target_height);
+        args.push("-filter_complex".to_string());
+        args.push(filter_chain);
+        args.push("-map".to_string());
+        args.push("[scaled]".to_string());
+    } else {
+        args.push("-filter_complex".to_string());
+        args.push(filter_chain);
+        args.push("-map".to_string());
+        args.push("[final]".to_string());
+    }
+
+    // Common output args (framerate, audio, pixel format)
+    // Note: pixel format is critical for compatibility
+    let common_args = vec![
+        "-r".to_string(), "60".to_string(),
+        "-pix_fmt".to_string(), "yuv420p".to_string(),
         "-c:a".to_string(), "aac".to_string(),
         "-b:a".to_string(), "192k".to_string(),
         output_path.clone(),
-    ]);
+    ];
     
-    println!("FFmpeg args: {:?}", args);
+    // Retry loop: Try Hardware (if available) -> Then Software
+    let attempts = if hw_encoder.is_some() { 2 } else { 1 };
     
-    let output = Command::new("ffmpeg")
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
-
-    if output.status.success() {
-        println!("Export successful!");
-        Ok(output_path)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        println!("FFmpeg FAILED!");
-        println!("stderr: {}", stderr);
-        Err(format!("FFmpeg failed: {}", stderr))
+    for attempt in 0..attempts {
+        let mut current_args = args.clone();
+        
+        // If this is the second attempt (attempt == 1), fall back to software
+        if attempt == 1 {
+            println!("Hardware encoding failed. Retrying with software encoding (libx264)...");
+            encoder = "libx264".to_string();
+            let params = get_encoding_params(&quality_setting, &None);
+            preset = params.1;
+            crf_or_qp = params.2;
+        }
+        
+        println!("Attempt {}/{} with encoder: {}", attempt + 1, attempts, encoder);
+        
+        // Add encoder-specific args
+        current_args.push("-c:v".to_string());
+        current_args.push(encoder.clone());
+        
+        if encoder == "libx264" {
+            current_args.extend([
+                "-preset".to_string(), preset.clone(),
+                "-crf".to_string(), crf_or_qp.clone(),
+            ]);
+        } else {
+            current_args.extend([
+                "-preset".to_string(), preset.clone(),
+                "-qp".to_string(), crf_or_qp.clone(),
+                "-rc".to_string(), "constqp".to_string(),
+            ]);
+        }
+        
+        // Add common args
+        current_args.extend(common_args.clone());
+        
+        println!("Running FFmpeg...");
+        // println!("Args: {:?}", current_args); // Debug if needed
+        
+        let output = Command::new("ffmpeg")
+            .args(&current_args)
+            .output()
+            .map_err(|e| format!("Failed to execute FFmpeg: {}", e))?;
+            
+        if output.status.success() {
+            println!("Export successful!");
+            return Ok(output_path);
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("FFmpeg failed with stderr: {}", stderr);
+            
+            // If this was the last attempt, return error
+            if attempt == attempts - 1 {
+                return Err(format!("FFmpeg failed: {}", stderr));
+            }
+            // Otherwise loop continues to retry
+        }
     }
+    
+    Err("Export failed after retries".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

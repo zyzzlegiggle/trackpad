@@ -564,6 +564,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     trimEnd,
                     effects: zoomEffects,
                     backgroundColor: canvasSettings.backgroundColor.replace('#', ''),
+                    resolution: exportSettings.resolution,
+                    quality: exportSettings.quality,
+                    format: exportSettings.format,
                     ...cursorExportData,
                 });
             } else {
