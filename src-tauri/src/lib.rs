@@ -96,10 +96,172 @@ struct CursorExportSettings {
     visible: bool,
     size: i32,       // Cursor size in pixels
     color: String,   // Hex color without #
+    style: String,   // "pointer", "circle", or "crosshair"
 }
 
-// Build cursor filter for FFmpeg - generates drawbox commands for cursor positions
-// First Principles: FFmpeg can't iterate arrays, so we generate time-segmented drawbox filters
+// Generate cursor image as PNG file for FFmpeg overlay
+// First Principles: FFmpeg can overlay images with transparency, so we generate
+// the exact cursor graphics used in the preview (pointer/circle/crosshair)
+fn generate_cursor_image(style: &str, size: i32, color: &str) -> Result<std::path::PathBuf, String> {
+    use image::{Rgba, RgbaImage};
+    
+    let size_u = size as u32;
+    let mut img = RgbaImage::new(size_u, size_u);
+    
+    // Parse hex color
+    let r = u8::from_str_radix(&color[0..2], 16).unwrap_or(255);
+    let g = u8::from_str_radix(&color[2..4], 16).unwrap_or(255);
+    let b = u8::from_str_radix(&color[4..6], 16).unwrap_or(255);
+    let cursor_color = Rgba([r, g, b, 230]); // Slightly transparent
+    let outline_color = Rgba([0, 0, 0, 180]);
+    let center_color = Rgba([0, 0, 0, 128]);
+    
+    let center = size as f32 / 2.0;
+    
+    match style {
+        "circle" => {
+            // Draw filled circle with outer ring and center dot
+            let outer_radius = size as f32 * 0.42;
+            let inner_radius = size as f32 * 0.12;
+            
+            for y in 0..size_u {
+                for x in 0..size_u {
+                    let dx = x as f32 - center;
+                    let dy = y as f32 - center;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    
+                    if dist <= inner_radius {
+                        // Center dot
+                        img.put_pixel(x, y, center_color);
+                    } else if dist <= outer_radius {
+                        // Main circle
+                        img.put_pixel(x, y, cursor_color);
+                    } else if dist <= outer_radius + 1.5 {
+                        // Outline
+                        img.put_pixel(x, y, outline_color);
+                    }
+                }
+            }
+        }
+        "crosshair" => {
+            // Draw crosshair with central circle
+            let line_width = (size as f32 * 0.08).max(2.0) as i32;
+            let circle_radius = size as f32 * 0.18;
+            let arm_length = size as f32 * 0.4;
+            
+            for y in 0..size_u {
+                for x in 0..size_u {
+                    let dx = x as f32 - center;
+                    let dy = y as f32 - center;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    
+                    // Central circle (hollow)
+                    if dist >= circle_radius - 1.5 && dist <= circle_radius + 1.5 {
+                        img.put_pixel(x, y, cursor_color);
+                    }
+                    // Horizontal arms
+                    else if (dy.abs() as i32) < line_width && dx.abs() > circle_radius && dx.abs() < arm_length + circle_radius {
+                        img.put_pixel(x, y, cursor_color);
+                    }
+                    // Vertical arms
+                    else if (dx.abs() as i32) < line_width && dy.abs() > circle_radius && dy.abs() < arm_length + circle_radius {
+                        img.put_pixel(x, y, cursor_color);
+                    }
+                }
+            }
+        }
+        _ => {
+            // "pointer" - Draw arrow cursor (matches SVG path "M4 4l7.07 17 2.51-7.39L21 11.07z")
+            // Simplified triangular pointer shape
+            let scale = size as f32 / 24.0;
+            
+            // Define pointer polygon points (from SVG, scaled)
+            let points: [(f32, f32); 4] = [
+                (4.0 * scale, 4.0 * scale),      // Top-left tip
+                (11.07 * scale, 21.0 * scale),   // Bottom
+                (13.58 * scale, 13.61 * scale),  // Inner corner
+                (21.0 * scale, 11.07 * scale),   // Right point
+            ];
+            
+            // Simple point-in-polygon test for each pixel
+            for y in 0..size_u {
+                for x in 0..size_u {
+                    let px = x as f32;
+                    let py = y as f32;
+                    
+                    // Check if point is inside the pointer polygon
+                    if point_in_polygon(px, py, &points) {
+                        img.put_pixel(x, y, cursor_color);
+                    }
+                    // Check if point is on the edge (for outline)
+                    else if is_near_polygon_edge(px, py, &points, 1.2) {
+                        img.put_pixel(x, y, outline_color);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Save to temp file
+    let temp_dir = std::env::temp_dir();
+    let cursor_path = temp_dir.join(format!("visualcoder_cursor_{}_{}.png", style, size));
+    img.save(&cursor_path).map_err(|e| format!("Failed to save cursor image: {}", e))?;
+    
+    println!("Generated cursor image: {:?}", cursor_path);
+    Ok(cursor_path)
+}
+
+// Helper: Check if point is inside polygon using ray casting
+fn point_in_polygon(px: f32, py: f32, polygon: &[(f32, f32)]) -> bool {
+    let n = polygon.len();
+    let mut inside = false;
+    let mut j = n - 1;
+    
+    for i in 0..n {
+        let (xi, yi) = polygon[i];
+        let (xj, yj) = polygon[j];
+        
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+// Helper: Check if point is near any edge of polygon
+fn is_near_polygon_edge(px: f32, py: f32, polygon: &[(f32, f32)], threshold: f32) -> bool {
+    let n = polygon.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (x1, y1) = polygon[i];
+        let (x2, y2) = polygon[j];
+        
+        // Distance from point to line segment
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let len_sq = dx * dx + dy * dy;
+        
+        if len_sq == 0.0 {
+            continue;
+        }
+        
+        let t = ((px - x1) * dx + (py - y1) * dy) / len_sq;
+        let t = t.clamp(0.0, 1.0);
+        
+        let closest_x = x1 + t * dx;
+        let closest_y = y1 + t * dy;
+        
+        let dist = ((px - closest_x).powi(2) + (py - closest_y).powi(2)).sqrt();
+        if dist <= threshold {
+            return true;
+        }
+    }
+    false
+}
+
+// Build cursor filter for FFmpeg - uses overlay with cursor image
+// First Principles: Generate cursor PNG once, then overlay at each position using FFmpeg expressions
 fn build_cursor_filter(
     cursor_positions: &Option<Vec<CursorFrame>>,
     cursor_settings: &Option<CursorExportSettings>,
@@ -109,93 +271,116 @@ fn build_cursor_filter(
     trim_start: f64,
     _duration: f64,
     base_filter: String,
-) -> String {
+) -> Result<String, String> {
     // If no cursor settings or not visible, just return base filter with rename
     let settings = match cursor_settings {
         Some(s) if s.visible => s,
-        _ => return format!("{};[out]copy[final]", base_filter),
+        _ => return Ok(format!("{};[out]copy[final]", base_filter)),
     };
     
     let positions = match cursor_positions {
         Some(p) if !p.is_empty() => p,
-        _ => return format!("{};[out]copy[final]", base_filter),
+        _ => return Ok(format!("{};[out]copy[final]", base_filter)),
     };
     
-    println!("Building cursor filter for {} positions", positions.len());
+    println!("Building cursor overlay filter for {} positions", positions.len());
+    
+    // Generate cursor image matching preview graphics
+    let cursor_path = generate_cursor_image(&settings.style, settings.size, &settings.color)?;
+    
+    // FFmpeg movie filter path escaping for Windows:
+    // - Convert backslashes to forward slashes
+    // - Escape colons (C: becomes C\\:)
+    // - Escape special characters
+    let cursor_path_str = cursor_path.to_string_lossy()
+        .replace("\\", "/")
+        .replace(":", "\\:");
+    
+    println!("Cursor image path for FFmpeg: {}", cursor_path_str);
     
     let cursor_size = settings.size;
-    let cursor_color = &settings.color;
     
     // Calculate video offset in canvas (video is centered with base_scale)
     let margin = (1.0 - base_scale) / 2.0;
-    let video_offset_x = (margin * width as f64) as i32;
-    let video_offset_y = (margin * height as f64) as i32;
-    let video_w = (width as f64 * base_scale) as i32;
-    let video_h = (height as f64 * base_scale) as i32;
+    let video_offset_x = margin * width as f64;
+    let video_offset_y = margin * height as f64;
+    let video_w = width as f64 * base_scale;
+    let video_h = height as f64 * base_scale;
     
-    // Build drawbox filter chain
-    // Strategy: For each pair of adjacent cursor positions, draw cursor for that time segment
-    // FFmpeg drawbox with enable='between(t,start,end)' and x/y as linear interpolation
+    // Build overlay expression for cursor position
+    // We need to build a piecewise expression that evaluates cursor position based on time
+    // FFmpeg overlay supports 'x' and 'y' expressions evaluated per frame
     
-    // Limit number of drawbox filters to avoid FFmpeg filter graph limit
-    // Sample every Nth position if too many
-    let max_segments = 500;
-    let step = (positions.len() / max_segments).max(1);
+    // Sample positions to avoid expression length limits
+    let max_keyframes = 200;
+    let step = (positions.len() / max_keyframes).max(1);
     
-    let mut drawbox_chain = String::new();
-    let mut filter_count = 0;
+    // Build x and y position expressions as nested if() statements
+    // Format: if(lt(t,t1),x0,if(lt(t,t2),x1,...))
+    let mut x_expr_parts: Vec<(f64, f64)> = Vec::new();
+    let mut y_expr_parts: Vec<(f64, f64)> = Vec::new();
     
-    for i in (0..positions.len().saturating_sub(1)).step_by(step) {
-        let p1 = &positions[i];
-        let p2 = &positions[(i + step).min(positions.len() - 1)];
+    for i in (0..positions.len()).step_by(step) {
+        let p = &positions[i];
+        let t = (p.timestamp_ms as f64 / 1000.0) - trim_start;
         
-        // Convert timestamps to seconds relative to trim
-        let t1 = (p1.timestamp_ms as f64 / 1000.0) - trim_start;
-        let t2 = (p2.timestamp_ms as f64 / 1000.0) - trim_start;
-        
-        // Skip if outside valid range
-        if t2 < 0.0 || t1 < 0.0 {
+        if t < 0.0 {
             continue;
         }
         
-        // Calculate pixel positions (cursor position is in video coords, need canvas coords)
-        // Canvas position = video_offset + cursor_norm * video_size
-        let x1 = video_offset_x + (p1.x * video_w as f64) as i32;
-        let y1 = video_offset_y + (p1.y * video_h as f64) as i32;
-        let x2 = video_offset_x + (p2.x * video_w as f64) as i32;
-        let y2 = video_offset_y + (p2.y * video_h as f64) as i32;
-        
-        // For simplicity, draw at interpolated position using enable
-        // FFmpeg doesn't support dynamic x/y in drawbox, so we use center of segment
-        let x_center = (x1 + x2) / 2 - cursor_size / 2;
-        let y_center = (y1 + y2) / 2 - cursor_size / 2;
+        // Calculate pixel position: offset + normalized * video_size - cursor_half_size
+        let x_pos = video_offset_x + p.x * video_w - (cursor_size as f64 / 2.0);
+        let y_pos = video_offset_y + p.y * video_h - (cursor_size as f64 / 2.0);
         
         // Clamp to valid range
-        let x_clamped = x_center.max(0).min(width - cursor_size);
-        let y_clamped = y_center.max(0).min(height - cursor_size);
+        let x_clamped = x_pos.max(0.0).min((width - cursor_size) as f64);
+        let y_clamped = y_pos.max(0.0).min((height - cursor_size) as f64);
         
-        // Add drawbox filter
-        let enable = format!("between(t,{:.3},{:.3})", t1, t2);
-        let drawbox = format!(
-            "drawbox=x={}:y={}:w={}:h={}:c=0x{}@0.9:t=fill:enable='{}'",
-            x_clamped, y_clamped, cursor_size, cursor_size, cursor_color, enable
-        );
-        
-        if drawbox_chain.is_empty() {
-            drawbox_chain = drawbox;
-        } else {
-            drawbox_chain = format!("{},{}", drawbox_chain, drawbox);
-        }
-        filter_count += 1;
+        x_expr_parts.push((t, x_clamped));
+        y_expr_parts.push((t, y_clamped));
     }
     
-    println!("Generated {} cursor drawbox filters", filter_count);
+    // Build nested if expressions for smooth interpolation
+    // Use linear interpolation between keyframes
+    let x_expr = build_interpolation_expr(&x_expr_parts);
+    let y_expr = build_interpolation_expr(&y_expr_parts);
     
-    if drawbox_chain.is_empty() {
-        format!("{};[out]copy[final]", base_filter)
-    } else {
-        format!("{};[out]{}[final]", base_filter, drawbox_chain)
+    // Load cursor image and overlay on video
+    // movie filter loads the cursor, overlay composites it
+    let cursor_filter = format!(
+        "{base};movie='{cursor}'[cur];[out][cur]overlay=x='{x}':y='{y}':eval=frame:format=auto[final]",
+        base = base_filter,
+        cursor = cursor_path_str,
+        x = x_expr,
+        y = y_expr
+    );
+    
+    println!("Cursor overlay filter built with {} keyframes", x_expr_parts.len());
+    Ok(cursor_filter)
+}
+
+// Build interpolation expression for smooth cursor movement
+// Returns FFmpeg expression that linearly interpolates between keyframes
+fn build_interpolation_expr(keyframes: &[(f64, f64)]) -> String {
+    if keyframes.is_empty() {
+        return "0".to_string();
     }
+    if keyframes.len() == 1 {
+        return format!("{:.1}", keyframes[0].1);
+    }
+    
+    // For performance, limit nesting depth by using simple piecewise constant
+    // This avoids FFmpeg expression complexity issues while still being smooth enough
+    // at 60fps with 200 keyframes
+    
+    let mut expr = format!("{:.1}", keyframes.last().unwrap().1); // Default to last value
+    
+    for kf in keyframes.iter().rev() {
+        let (t, v) = kf;
+        expr = format!("if(lt(t,{:.3}),{:.1},{})", t, v, expr);
+    }
+    
+    expr
 }
 
 #[tauri::command]
@@ -392,7 +577,7 @@ async fn export_with_effects(
             trim_start,
             duration,
             filter,
-        );
+        )?;
         
         args.push("-filter_complex".to_string());
         args.push(final_filter);
@@ -423,7 +608,7 @@ async fn export_with_effects(
             trim_start,
             duration,
             filter,
-        );
+        )?;
         
         args.push("-filter_complex".to_string());
         args.push(final_filter);

@@ -550,6 +550,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     visible: cursorSettings.visible,
                     size: cursorSettings.size,
                     color: cursorSettings.color.replace('#', ''),
+                    style: cursorSettings.style,  // Pass cursor style for proper graphic generation
                 },
             } : {};
 
