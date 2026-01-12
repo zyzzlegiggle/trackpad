@@ -42,6 +42,8 @@ lazy_static::lazy_static! {
     static ref CURSOR_POSITIONS: Mutex<Vec<CursorPosition>> = Mutex::new(Vec::new());
     static ref RECORDING_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
     static ref LAST_CLICK: Mutex<Option<(Instant, f64, f64)>> = Mutex::new(None);
+    // Track when the last zoom was triggered to prevent stacking during active zoom
+    static ref LAST_ZOOM_TRIGGER: Mutex<Option<Instant>> = Mutex::new(None);
     static ref LAST_CURSOR_SAMPLE: Mutex<Option<Instant>> = Mutex::new(None);
     static ref SCREEN_SIZE: Mutex<(u32, u32)> = Mutex::new((1920, 1080));
     // Capture target bounds: (x, y, width, height) - for coordinate transformation
@@ -359,15 +361,40 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                 };
                 
                 // Only store double-clicks (that's what triggers zoom)
+                // But first, check if we're in a zoom cooldown period
+                // Principle: A zoom lasts ~3 seconds, so ignore double-clicks during that time
                 if is_double_click {
-                    let click_event = ClickEvent {
-                        timestamp_ms,
-                        x: norm_x,
-                        y: norm_y,
-                        is_double_click: true,
+                    const ZOOM_COOLDOWN_MS: u128 = 3000; // Match typical zoom duration
+                    
+                    let should_trigger_zoom = {
+                        let mut last_zoom = LAST_ZOOM_TRIGGER.lock().unwrap();
+                        let in_cooldown = if let Some(last_trigger_time) = *last_zoom {
+                            now.duration_since(last_trigger_time).as_millis() < ZOOM_COOLDOWN_MS
+                        } else {
+                            false
+                        };
+                        
+                        if !in_cooldown {
+                            // Not in cooldown, this double-click triggers a zoom
+                            *last_zoom = Some(now);
+                            true
+                        } else {
+                            // In cooldown, ignore this double-click
+                            println!("Double-click ignored (zoom cooldown active)");
+                            false
+                        }
                     };
-                    println!("Double-click captured at ({:.3}, {:.3}) in video coords @ {}ms", norm_x, norm_y, timestamp_ms);
-                    CLICK_EVENTS.lock().unwrap().push(click_event);
+                    
+                    if should_trigger_zoom {
+                        let click_event = ClickEvent {
+                            timestamp_ms,
+                            x: norm_x,
+                            y: norm_y,
+                            is_double_click: true,
+                        };
+                        println!("Double-click captured at ({:.3}, {:.3}) in video coords @ {}ms", norm_x, norm_y, timestamp_ms);
+                        CLICK_EVENTS.lock().unwrap().push(click_event);
+                    }
                 }
             }
         };
@@ -396,6 +423,7 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
     CLICK_EVENTS.lock().unwrap().clear();
     CURSOR_POSITIONS.lock().unwrap().clear();
     *LAST_CLICK.lock().unwrap() = None;
+    *LAST_ZOOM_TRIGGER.lock().unwrap() = None;
     *LAST_CURSOR_SAMPLE.lock().unwrap() = None;
     *RECORDING_START_TIME.lock().unwrap() = Some(Instant::now());
     

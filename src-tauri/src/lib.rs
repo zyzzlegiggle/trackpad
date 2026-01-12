@@ -305,8 +305,10 @@ fn build_cursor_overlay_on_video(
     // we just convert normalized (0-1) to actual video pixel coordinates.
     // The cursor center should be at (x * width, y * height), so we subtract half cursor size.
     
-    // Sample positions to avoid expression length limits
-    let max_keyframes = 100;
+    // FIRST PRINCIPLES: More keyframes = smoother cursor movement
+    // At 60fps, 500 keyframes over 10s = 1 keyframe every 1.2 frames (very smooth)
+    // Previous: 100 keyframes caused ~6 frame gaps = visible jitter
+    let max_keyframes = 500;
     let step = (positions.len() / max_keyframes).max(1);
     
     let mut x_expr_parts: Vec<(f64, f64)> = Vec::new();
@@ -354,25 +356,62 @@ fn build_cursor_overlay_on_video(
 }
 
 // Build interpolation expression for smooth cursor movement
-// Returns FFmpeg expression that linearly interpolates between keyframes
+// FIRST PRINCIPLES: Linear interpolation between keyframes, not step functions
+// Preview uses lerp: newPos = oldPos + (targetPos - oldPos) * smoothing
+// FFmpeg equivalent: lerp(a, b, t) = a + (b-a) * clamp((time-t1)/(t2-t1), 0, 1)
 fn build_interpolation_expr(keyframes: &[(f64, f64)]) -> String {
     if keyframes.is_empty() {
         return "0".to_string();
     }
     if keyframes.len() == 1 {
-        return format!("{:.1}", keyframes[0].1);
+        return format!("{:.2}", keyframes[0].1);
     }
     
-    // For performance, limit nesting depth by using simple piecewise constant
-    // This avoids FFmpeg expression complexity issues while still being smooth enough
-    // at 60fps with 200 keyframes
+    // FIRST PRINCIPLES FIX: Use proper linear interpolation between keyframes
+    // Instead of step functions that cause jitter, we linearly blend between
+    // adjacent keyframe values based on time position.
+    //
+    // For each segment [t1, t2] with values [v1, v2]:
+    // lerp_t = clamp((t - t1) / (t2 - t1), 0, 1)
+    // value = v1 + (v2 - v1) * lerp_t
+    //
+    // We build a nested expression that handles segments in order.
     
-    let mut expr = format!("{:.1}", keyframes.last().unwrap().1); // Default to last value
+    // Start with the last value as default (for times beyond last keyframe)
+    let mut expr = format!("{:.2}", keyframes.last().unwrap().1);
     
-    for kf in keyframes.iter().rev() {
-        let (t, v) = kf;
-        expr = format!("if(lt(t,{:.3}),{:.1},{})", t, v, expr);
+    // Build expression from end to start (for proper nesting)
+    // Each segment handles times in [t_i, t_{i+1}] with linear interpolation
+    for i in (0..keyframes.len() - 1).rev() {
+        let (t1, v1) = keyframes[i];
+        let (t2, v2) = keyframes[i + 1];
+        let dt = t2 - t1;
+        
+        if dt <= 0.0 {
+            continue; // Skip invalid segments
+        }
+        
+        // Linear interpolation: v1 + (v2 - v1) * ((t - t1) / dt)
+        // Clamp to [0, 1] range using min/max
+        let dv = v2 - v1;
+        
+        // FFmpeg lerp expression for this segment
+        // lerp_t = min(1, max(0, (t-t1)/dt))
+        // result = v1 + dv * lerp_t
+        let lerp_expr = format!(
+            "{v1:.2}+{dv:.4}*min(1,max(0,(t-{t1:.4})/{dt:.4}))",
+            v1 = v1, dv = dv, t1 = t1, dt = dt
+        );
+        
+        // If time is in this segment's range, use lerp; otherwise use previous expr
+        expr = format!("if(lt(t,{t2:.4}),{lerp},{prev})",
+            t2 = t2, lerp = lerp_expr, prev = expr
+        );
     }
+    
+    // Handle times before first keyframe
+    let (t0, v0) = keyframes[0];
+    expr = format!("if(lt(t,{t0:.4}),{v0:.2},{expr})", t0 = t0, v0 = v0, expr = expr);
     
     expr
 }
@@ -384,10 +423,10 @@ fn build_interpolation_expr(keyframes: &[(f64, f64)]) -> String {
 // to use as the pan target for export.
 fn compute_cursor_pan_during_effect(
     positions: &Vec<CursorFrame>,
-    effect_start: f64,
+    _effect_start: f64,
     zoom_in_end: f64,
     zoom_out_start: f64,
-    effect_end: f64,
+    _effect_end: f64,
     default_x: f64,
     default_y: f64,
     _margin: f64,
@@ -427,6 +466,85 @@ fn compute_cursor_pan_during_effect(
         println!("  Cursor pan: using initial target ({:.3}, {:.3}), no cursor data in hold phase", default_x, default_y);
         (default_x, default_y)
     }
+}
+
+// FIRST PRINCIPLES: Build dynamic pan expressions that follow cursor during zoom
+// 
+// Preview behavior:
+// - Zoom-in phase (s to si): pan from initial target with smoothstep easing
+// - Hold phase (si to so): follow cursor with 0.12 smoothing factor
+// - Zoom-out phase (so to e): maintain last position with smoothstep easing out
+//
+// For export, we build an FFmpeg expression that interpolates cursor positions
+// over time during the hold phase.
+fn build_dynamic_pan_during_effect(
+    positions: &Vec<CursorFrame>,
+    effect_start: f64,
+    zoom_in_end: f64,
+    zoom_out_start: f64,
+    effect_end: f64,
+    initial_x: f64,
+    initial_y: f64,
+    trim_start: f64,
+) -> (String, String) {
+    // Find cursor positions during the ENTIRE effect (not just hold phase)
+    let effect_start_ms = ((effect_start + trim_start) * 1000.0) as u64;
+    let effect_end_ms = ((effect_end + trim_start) * 1000.0) as u64;
+    
+    // Collect positions during effect
+    let mut effect_positions: Vec<(f64, f64, f64)> = Vec::new(); // (time, x, y)
+    
+    for pos in positions.iter() {
+        if pos.timestamp_ms >= effect_start_ms && pos.timestamp_ms <= effect_end_ms {
+            let t = (pos.timestamp_ms as f64 / 1000.0) - trim_start;
+            effect_positions.push((t, pos.x, pos.y));
+        }
+    }
+    
+    // If no positions, return static target
+    if effect_positions.is_empty() {
+        println!("  Dynamic pan: no cursor data, using static target ({:.3}, {:.3})", initial_x, initial_y);
+        return (format!("{:.4}", initial_x), format!("{:.4}", initial_y));
+    }
+    
+    // Sample positions for expression (limit to prevent overly complex expressions)
+    let max_keyframes = 50; // Fewer than cursor overlay since pan is less time-varying
+    let step = (effect_positions.len() / max_keyframes).max(1);
+    
+    let mut x_keyframes: Vec<(f64, f64)> = Vec::new();
+    let mut y_keyframes: Vec<(f64, f64)> = Vec::new();
+    
+    // Add initial position at effect start (use initial target during zoom-in)
+    x_keyframes.push((effect_start, initial_x));
+    y_keyframes.push((effect_start, initial_y));
+    
+    // Add sampled positions during hold phase
+    for i in (0..effect_positions.len()).step_by(step) {
+        let (t, x, y) = effect_positions[i];
+        // Only add if we're past the zoom-in phase
+        if t >= zoom_in_end {
+            x_keyframes.push((t, x));
+            y_keyframes.push((t, y));
+        }
+    }
+    
+    // Extend last position through zoom-out phase
+    if let Some(&(_, last_x, last_y)) = effect_positions.last() {
+        if zoom_out_start > effect_start {
+            x_keyframes.push((zoom_out_start, last_x));
+            y_keyframes.push((zoom_out_start, last_y));
+        }
+        x_keyframes.push((effect_end, last_x));
+        y_keyframes.push((effect_end, last_y));
+    }
+    
+    println!("  Dynamic pan: built {} keyframes for cursor-following", x_keyframes.len());
+    
+    // Build interpolation expressions
+    let x_expr = build_interpolation_expr(&x_keyframes);
+    let y_expr = build_interpolation_expr(&y_keyframes);
+    
+    (x_expr, y_expr)
 }
 
 // Export settings struct for quality/resolution/format
@@ -642,14 +760,20 @@ async fn export_with_effects(
             zoom_parts.push(format!("if(between(t,{},{}),{},0)", s, e, zoom_expr));
             
             // CURSOR-FOLLOWING PAN (First Principles)
-            // During hold phase, we should follow the cursor like the preview does.
-            // For now, we use a simplified approach: compute weighted average position
-            // from cursor data during the effect's time range.
-            let (pan_x, pan_y) = if let Some(ref positions) = cursor_positions {
-                // Find cursor positions during hold phase and compute smooth path
-                compute_cursor_pan_during_effect(positions, s, si, so, e, tx, ty, margin, base_scale, trim_start)
+            // Preview behavior during zoom:
+            // - Zoom-in phase: pan to initial target
+            // - Hold phase: smoothly follow cursor position frame-by-frame
+            // - Zoom-out phase: maintain last position
+            //
+            // For export, we need to build an expression that dynamically follows the cursor
+            // during the hold phase, not just use a static average position.
+            
+            // Build dynamic pan expressions based on cursor positions during effect
+            let (pan_x_expr, pan_y_expr) = if let Some(ref positions) = cursor_positions {
+                build_dynamic_pan_during_effect(positions, s, si, so, e, tx, ty, trim_start)
             } else {
-                (tx, ty)
+                // No cursor data, use static target
+                (format!("{:.4}", tx), format!("{:.4}", ty))
             };
             
             // FIRST PRINCIPLES: Match preview's exact transform formula
@@ -674,15 +798,15 @@ async fn export_with_effects(
             
             // x_offset = (0.5 - pan_x) * iw * base_scale * zoom_factor
             // But since video_w = iw * base * zoom = width * base * zoom (for 1:1 aspect)
-            // We can express as: (0.5 - pan_x) * width * base_scale * (zoom_expr)
+            // We can express as: (0.5 - pan_expr) * width * base_scale * (zoom_expr)
             
-            let x_offset_formula = format!("(0.5-{pan})*{w}*{base}*({zoom_expr})", 
-                pan = pan_x,
+            let x_offset_formula = format!("(0.5-({pan}))*{w}*{base}*({zoom_expr})", 
+                pan = pan_x_expr,
                 w = width,
                 base = base_scale,
                 zoom_expr = zoom_expr);
-            let y_offset_formula = format!("(0.5-{pan})*{h}*{base}*({zoom_expr})", 
-                pan = pan_y,
+            let y_offset_formula = format!("(0.5-({pan}))*{h}*{base}*({zoom_expr})", 
+                pan = pan_y_expr,
                 h = height,
                 base = base_scale,
                 zoom_expr = zoom_expr);
