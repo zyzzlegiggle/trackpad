@@ -261,37 +261,37 @@ fn is_near_polygon_edge(px: f32, py: f32, polygon: &[(f32, f32)], threshold: f32
 }
 
 // Build cursor filter for FFmpeg - uses overlay with cursor image
-// First Principles: Generate cursor PNG once, then overlay at each position using FFmpeg expressions
-fn build_cursor_filter(
+// FIRST PRINCIPLES RESTRUCTURE: 
+// The cursor is overlaid on the raw video BEFORE any zoom/scale transforms.
+// This means the cursor becomes part of the video content and naturally
+// scales with it when zoom effects are applied.
+// 
+// Input: raw video stream
+// Output: video stream with cursor baked in, ready for zoom processing
+fn build_cursor_overlay_on_video(
     cursor_positions: &Option<Vec<CursorFrame>>,
     cursor_settings: &Option<CursorExportSettings>,
-    width: i32,
-    height: i32,
-    base_scale: f64,
+    video_width: i32,
+    video_height: i32,
     trim_start: f64,
-    _duration: f64,
-    base_filter: String,
-) -> Result<String, String> {
-    // If no cursor settings or not visible, just return base filter with rename
+) -> Result<Option<String>, String> {
+    // If no cursor settings or not visible, return None (no filter needed)
     let settings = match cursor_settings {
         Some(s) if s.visible => s,
-        _ => return Ok(format!("{};[out]copy[final]", base_filter)),
+        _ => return Ok(None),
     };
     
     let positions = match cursor_positions {
         Some(p) if !p.is_empty() => p,
-        _ => return Ok(format!("{};[out]copy[final]", base_filter)),
+        _ => return Ok(None),
     };
     
-    println!("Building cursor overlay filter for {} positions", positions.len());
+    println!("Building cursor overlay for {} positions (applying to raw video)", positions.len());
     
     // Generate cursor image matching preview graphics
     let cursor_path = generate_cursor_image(&settings.style, settings.size, &settings.color)?;
     
-    // FFmpeg movie filter path escaping for Windows:
-    // - Convert backslashes to forward slashes
-    // - Escape colons (C: becomes C\\:)
-    // - Escape special characters
+    // FFmpeg movie filter path escaping for Windows
     let cursor_path_str = cursor_path.to_string_lossy()
         .replace("\\", "/")
         .replace(":", "\\:");
@@ -300,24 +300,15 @@ fn build_cursor_filter(
     
     let cursor_size = settings.size;
     
-    // Calculate video offset in canvas (video is centered with base_scale)
-    let margin = (1.0 - base_scale) / 2.0;
-    let video_offset_x = margin * width as f64;
-    let video_offset_y = margin * height as f64;
-    let video_w = width as f64 * base_scale;
-    let video_h = height as f64 * base_scale;
-    
-    // Build overlay expression for cursor position
-    // We need to build a piecewise expression that evaluates cursor position based on time
-    // FFmpeg overlay supports 'x' and 'y' expressions evaluated per frame
+    // FIRST PRINCIPLES: Cursor positions are normalized (0-1) relative to the video content.
+    // Since we're overlaying directly on the raw video (before any scaling),
+    // we just convert normalized (0-1) to actual video pixel coordinates.
+    // The cursor center should be at (x * width, y * height), so we subtract half cursor size.
     
     // Sample positions to avoid expression length limits
-    // Reduced from 200 to 100 for simpler expressions and faster export
     let max_keyframes = 100;
     let step = (positions.len() / max_keyframes).max(1);
     
-    // Build x and y position expressions as nested if() statements
-    // Format: if(lt(t,t1),x0,if(lt(t,t2),x1,...))
     let mut x_expr_parts: Vec<(f64, f64)> = Vec::new();
     let mut y_expr_parts: Vec<(f64, f64)> = Vec::new();
     
@@ -329,35 +320,37 @@ fn build_cursor_filter(
             continue;
         }
         
-        // Calculate pixel position: offset + normalized * video_size - cursor_half_size
-        let x_pos = video_offset_x + p.x * video_w - (cursor_size as f64 / 2.0);
-        let y_pos = video_offset_y + p.y * video_h - (cursor_size as f64 / 2.0);
+        // Direct mapping: normalized position to pixels, centered
+        let x_pos = p.x * video_width as f64 - (cursor_size as f64 / 2.0);
+        let y_pos = p.y * video_height as f64 - (cursor_size as f64 / 2.0);
         
         // Clamp to valid range
-        let x_clamped = x_pos.max(0.0).min((width - cursor_size) as f64);
-        let y_clamped = y_pos.max(0.0).min((height - cursor_size) as f64);
+        let x_clamped = x_pos.max(0.0).min((video_width - cursor_size) as f64);
+        let y_clamped = y_pos.max(0.0).min((video_height - cursor_size) as f64);
         
         x_expr_parts.push((t, x_clamped));
         y_expr_parts.push((t, y_clamped));
     }
     
-    // Build nested if expressions for smooth interpolation
-    // Use linear interpolation between keyframes
+    if x_expr_parts.is_empty() {
+        return Ok(None);
+    }
+    
+    // Build interpolation expressions
     let x_expr = build_interpolation_expr(&x_expr_parts);
     let y_expr = build_interpolation_expr(&y_expr_parts);
     
-    // Load cursor image and overlay on video
-    // movie filter loads the cursor, overlay composites it
+    // Return filter that overlays cursor on input video
+    // This filter transforms [0:v] into [vcur] (video with cursor)
     let cursor_filter = format!(
-        "{base};movie='{cursor}'[cur];[out][cur]overlay=x='{x}':y='{y}':eval=frame:format=auto[final]",
-        base = base_filter,
+        "movie='{cursor}'[cur];[0:v][cur]overlay=x='{x}':y='{y}':eval=frame:format=auto[vcur]",
         cursor = cursor_path_str,
         x = x_expr,
         y = y_expr
     );
     
     println!("Cursor overlay filter built with {} keyframes", x_expr_parts.len());
-    Ok(cursor_filter)
+    Ok(Some(cursor_filter))
 }
 
 // Build interpolation expression for smooth cursor movement
@@ -628,19 +621,39 @@ async fn export_with_effects(
             y_parts.join("+")
         };
         
+        // FIRST PRINCIPLES: Apply cursor overlay to raw video BEFORE zoom transforms
+        // This way the cursor becomes part of the video content and scales with it
+        let cursor_overlay = build_cursor_overlay_on_video(
+            &cursor_positions,
+            &cursor_settings,
+            width,
+            height,
+            trim_start,
+        )?;
+        
+        // Determine input stream for zoom processing
+        // If cursor overlay exists, use [vcur]; otherwise use [0:v]
+        let (cursor_prefix, video_input) = match &cursor_overlay {
+            Some(filter) => (format!("{};", filter), "[vcur]"),
+            None => (String::new(), "[0:v]"),
+        };
+        
         // Build the complete filter chain using overlay approach
-        // 1. Create background canvas at output size
-        // 2. Scale video by base_scale * zoom_factor
-        // 3. Overlay video centered on canvas with offset for target
+        // 1. (Optional) Apply cursor overlay to raw video
+        // 2. Create background canvas at output size
+        // 3. Scale video (with cursor) by base_scale * zoom_factor
+        // 4. Overlay video centered on canvas with offset for target
         
         let filter = format!(
-            "color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
-             [0:v]scale=w='iw*{base}*({zoom})':h='ih*{base}*({zoom})':eval=frame:flags=lanczos[vid];\
-             [bg][vid]overlay=x='({w}-overlay_w)/2+({x_off})':y='({h}-overlay_h)/2+({y_off})':eval=frame[out]",
+            "{cursor_prefix}color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
+             {input}scale=w='iw*{base}*({zoom})':h='ih*{base}*({zoom})':eval=frame:flags=lanczos[vid];\
+             [bg][vid]overlay=x='({w}-overlay_w)/2+({x_off})':y='({h}-overlay_h)/2+({y_off})':eval=frame[final]",
+            cursor_prefix = cursor_prefix,
             bg = bg_color,
             w = width,
             h = height,
             dur = duration,
+            input = video_input,
             base = base_scale,
             zoom = zoom_combined,
             x_off = x_offset,
@@ -649,51 +662,45 @@ async fn export_with_effects(
         
         println!("Filter: {}", filter);
         
-        // Add cursor filter if positions available
-        let final_filter = build_cursor_filter(
+        args.push("-filter_complex".to_string());
+        args.push(filter);
+        args.push("-map".to_string());
+        args.push("[final]".to_string());
+    } else {
+        // No zoom effects - just apply base scale with background
+        
+        // FIRST PRINCIPLES: Apply cursor overlay to raw video BEFORE scaling
+        let cursor_overlay = build_cursor_overlay_on_video(
             &cursor_positions,
             &cursor_settings,
             width,
             height,
-            base_scale,
             trim_start,
-            duration,
-            filter,
         )?;
         
-        args.push("-filter_complex".to_string());
-        args.push(final_filter);
-        args.push("-map".to_string());
-        args.push("[final]".to_string());
-    } else {
-        // No effects - just apply base scale with background
+        // Determine input stream for scaling
+        let (cursor_prefix, video_input) = match &cursor_overlay {
+            Some(filter) => (format!("{};", filter), "[vcur]"),
+            None => (String::new(), "[0:v]"),
+        };
+        
         let filter = format!(
-            "color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
-             [0:v]scale=w='iw*{base}':h='ih*{base}':flags=lanczos[vid];\
-             [bg][vid]overlay=x='({w}-overlay_w)/2':y='({h}-overlay_h)/2'[out]",
+            "{cursor_prefix}color=c=0x{bg}:s={w}x{h}:d={dur}[bg];\
+             {input}scale=w='iw*{base}':h='ih*{base}':flags=lanczos[vid];\
+             [bg][vid]overlay=x='({w}-overlay_w)/2':y='({h}-overlay_h)/2'[final]",
+            cursor_prefix = cursor_prefix,
             bg = bg_color,
             w = width,
             h = height,
             dur = duration,
+            input = video_input,
             base = base_scale
         );
         
         println!("Filter (no effects): {}", filter);
         
-        // Add cursor filter if positions available
-        let final_filter = build_cursor_filter(
-            &cursor_positions,
-            &cursor_settings,
-            width,
-            height,
-            base_scale,
-            trim_start,
-            duration,
-            filter,
-        )?;
-        
         args.push("-filter_complex".to_string());
-        args.push(final_filter);
+        args.push(filter);
         args.push("-map".to_string());
         args.push("[final]".to_string());
     }

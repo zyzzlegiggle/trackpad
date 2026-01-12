@@ -1,0 +1,147 @@
+﻿cargo : warning: 
+unused variable: `now`
+At line:1 char:1
++ cargo check 2>&1 | 
+Out-File -FilePath 
+cargo_errors.txt 
+-Encoding utf8 ...
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (warning: u   
+ nused variable: `    
+now`:String) [],     
+RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+   --> 
+src\recorder.rs:234:21
+    |
+234 |                 
+let now = 
+Instant::now();
+    |                 
+    ^^^ help: if this 
+is intentional, 
+prefix it with an 
+underscore: `_now`
+    |
+    = note: `#[warn(un
+used_variables)]` 
+(part of 
+`#[warn(unused)]`) on 
+by default
+
+warning: unused 
+variable: `screen_w`
+   --> 
+src\recorder.rs:237:22
+    |
+237 |                 
+let (screen_w, 
+screen_h) = *SCREEN_SI
+ZE.lock().unwrap();
+    |                 
+     ^^^^^^^^ help: 
+if this is 
+intentional, prefix 
+it with an 
+underscore: 
+`_screen_w`
+
+warning: unused 
+variable: `screen_h`
+   --> 
+src\recorder.rs:237:32
+    |
+237 |                 
+let (screen_w, 
+screen_h) = *SCREEN_SI
+ZE.lock().unwrap();
+    |                 
+               
+^^^^^^^^ help: if 
+this is intentional, 
+prefix it with an 
+underscore: 
+`_screen_h`
+
+warning: unused 
+variable: `x`
+   --> 
+src\recorder.rs:240:22
+    |
+240 |                 
+let (x, y) = match 
+(event.name, 
+event.time) {
+    |                 
+     ^ help: if this 
+is intentional, 
+prefix it with an 
+underscore: `_x`
+
+warning: unused 
+variable: `y`
+   --> 
+src\recorder.rs:240:25
+    |
+240 |                 
+let (x, y) = match 
+(event.name, 
+event.time) {
+    |                 
+        ^ help: if 
+this is intentional, 
+prefix it with an 
+underscore: `_y`
+
+warning: function 
+`toggle_overlay` is 
+never used
+  --> src\lib.rs:13:4
+   |
+13 | fn 
+toggle_overlay(app: 
+tauri::AppHandle, 
+show: bool) {
+   |    ^^^^^^^^^^^^^^
+   |
+   = note: 
+`#[warn(dead_code)]` 
+(part of 
+`#[warn(unused)]`) on 
+by default
+
+warning: struct 
+`ExportOptions` is 
+never constructed
+   --> 
+src\lib.rs:382:8
+    |
+382 | struct 
+ExportOptions {
+    |        
+^^^^^^^^^^^^^
+
+warning: function `spa
+wn_mouse_listener` is 
+never used
+   --> 
+src\recorder.rs:223:4
+    |
+223 | fn spawn_mouse_l
+istener(stop_signal: 
+Arc<AtomicBool>) {
+    |    
+^^^^^^^^^^^^^^^^^^^^
+
+warning: `trackpad` 
+(lib) generated 8 
+warnings
+    Finished `dev` 
+profile [unoptimized 
++ debuginfo] 
+target(s) in 1.51s

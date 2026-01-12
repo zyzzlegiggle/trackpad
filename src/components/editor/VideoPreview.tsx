@@ -283,9 +283,14 @@ export function VideoPreview({
             }
 
             // Update custom cursor overlay position
+            // FIRST PRINCIPLES: Cursor positions are normalized (0-1) relative to the captured video content.
+            // We need to position the cursor relative to where the VIDEO actually renders, not the container.
+            // The container has padding which offsets the video, so we must account for this.
             const cursorEl = cursorOverlayRef.current;
             const curSettings = cursorSettingsRef.current;
-            if (cursorEl && curSettings.visible && positions.length > 0) {
+            const videoEl = video; // Already have reference from earlier
+
+            if (cursorEl && curSettings.visible && positions.length > 0 && videoEl) {
                 const rawPos = getCursorAtTime(positions, time * 1000, cursorIndexRef);
                 if (rawPos) {
                     const state = cursorStateRef.current;
@@ -310,9 +315,29 @@ export function VideoPreview({
                         ? 1 + Math.min(state.velocity * 30, 0.5) // Max 1.5x scale
                         : 1;
 
+                    // FIRST PRINCIPLES FIX: Get actual video element position within container
+                    // The video element uses object-contain, so its rendered dimensions may differ
+                    // from the container. We need to calculate where the video actually is.
+                    const videoRect = videoEl.getBoundingClientRect();
+                    const containerEl = container;
+                    const containerRect = containerEl.getBoundingClientRect();
+
+                    // Calculate video position relative to container (in pixels)
+                    const videoOffsetX = videoRect.left - containerRect.left;
+                    const videoOffsetY = videoRect.top - containerRect.top;
+
+                    // Cursor pixel position within container:
+                    // = video offset + (normalized cursor pos * video dimensions)
+                    const cursorPixelX = videoOffsetX + state.x * videoRect.width;
+                    const cursorPixelY = videoOffsetY + state.y * videoRect.height;
+
+                    // Convert to percentage of container for CSS positioning
+                    const cursorPercentX = (cursorPixelX / containerRect.width) * 100;
+                    const cursorPercentY = (cursorPixelY / containerRect.height) * 100;
+
                     // Update cursor DOM position directly (bypass React)
-                    cursorEl.style.left = `${(state.x * 100).toFixed(2)}%`;
-                    cursorEl.style.top = `${(state.y * 100).toFixed(2)}%`;
+                    cursorEl.style.left = `${cursorPercentX.toFixed(2)}%`;
+                    cursorEl.style.top = `${cursorPercentY.toFixed(2)}%`;
                     cursorEl.style.transform = `translate(-50%, -50%) scale(${velocityScale.toFixed(2)})`;
                     cursorEl.style.opacity = '1';
                 }
