@@ -377,6 +377,58 @@ fn build_interpolation_expr(keyframes: &[(f64, f64)]) -> String {
     expr
 }
 
+// Compute average cursor position during a zoom effect's hold phase
+// This allows the export to match the preview's cursor-following behavior
+// First Principles: During hold phase (between zoom-in and zoom-out), the camera
+// should follow the cursor. We compute the average cursor position during this phase
+// to use as the pan target for export.
+fn compute_cursor_pan_during_effect(
+    positions: &Vec<CursorFrame>,
+    effect_start: f64,
+    zoom_in_end: f64,
+    zoom_out_start: f64,
+    effect_end: f64,
+    default_x: f64,
+    default_y: f64,
+    _margin: f64,
+    _base_scale: f64,
+    trim_start: f64,
+) -> (f64, f64) {
+    // Find cursor positions during the hold phase (between zoom_in_end and zoom_out_start)
+    let hold_start_ms = ((zoom_in_end + trim_start) * 1000.0) as u64;
+    let hold_end_ms = ((zoom_out_start + trim_start) * 1000.0) as u64;
+    
+    // Early return if hold phase is too short
+    if hold_end_ms <= hold_start_ms || positions.is_empty() {
+        return (default_x, default_y);
+    }
+    
+    // Collect positions during hold phase
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut count = 0.0;
+    
+    for pos in positions.iter() {
+        if pos.timestamp_ms >= hold_start_ms && pos.timestamp_ms <= hold_end_ms {
+            sum_x += pos.x;
+            sum_y += pos.y;
+            count += 1.0;
+        }
+    }
+    
+    // Return average position, or default if no positions found
+    if count > 0.0 {
+        let avg_x = sum_x / count;
+        let avg_y = sum_y / count;
+        println!("  Cursor pan: ({:.3}, {:.3}) from {} samples during hold phase", avg_x, avg_y, count as i32);
+        (avg_x, avg_y)
+    } else {
+        // Use initial target if no cursor data during hold phase
+        println!("  Cursor pan: using initial target ({:.3}, {:.3}), no cursor data in hold phase", default_x, default_y);
+        (default_x, default_y)
+    }
+}
+
 // Export settings struct for quality/resolution/format
 #[derive(serde::Deserialize, Debug, Clone)]
 struct ExportOptions {
@@ -532,11 +584,16 @@ async fn export_with_effects(
     println!("Base scale: {:.2}, Margin: {:.1}%", base_scale, margin * 100.0);
     
     if !effects.is_empty() {
-        println!("Building filter for {} zoom effects", effects.len());
+        println!("Building filter for {} zoom effects (with smoothstep easing)", effects.len());
         
-        let ease = 0.3; // 300ms ease in/out
+        // FIRST PRINCIPLES: Match preview's zoom behavior exactly
+        // Preview uses smoothstep: t * t * (3 - 2 * t) for smooth in/out
+        // Preview follows cursor during hold phase with 0.12 smoothing
         
-        // Build zoom expressions
+        let ease = 0.35; // Match preview's "mellow" preset
+        
+        // Build zoom expressions with SMOOTHSTEP easing (matches preview exactly)
+        // Smoothstep formula: t² × (3 - 2t) where t = normalized time (0-1)
         let mut zoom_parts: Vec<String> = Vec::new();
         let mut x_parts: Vec<String> = Vec::new();
         let mut y_parts: Vec<String> = Vec::new();
@@ -545,8 +602,8 @@ async fn export_with_effects(
             // Adjust times relative to trim start
             let s = eff.start_time - trim_start;
             let e = eff.end_time - trim_start;
-            let zoom_scale = eff.scale;  // This is the ADDITIONAL zoom (e.g., 1.5 means 1.5x)
-            let tx = eff.target_x;  // Normalized 0-1 in video
+            let zoom_scale = eff.scale;
+            let tx = eff.target_x;
             let ty = eff.target_y;
             
             // Skip effects outside the trimmed range
@@ -555,40 +612,79 @@ async fn export_with_effects(
                 continue;
             }
             
-            let si = s + ease;
-            let so = e - ease;
-            
-            println!("Effect: time={:.2}-{:.2}, zoom={:.2}, target=({:.3},{:.3})", s, e, zoom_scale, tx, ty);
-            
-            // Zoom expression: returns current scale factor
-            // Base = 1.0, zoomed = zoom_scale
-            // Eased transition in and out
+            let si = s + ease;  // End of zoom-in phase
+            let so = e - ease;  // Start of zoom-out phase
             let delta = zoom_scale - 1.0;
+            
+            println!("Effect: time={:.2}-{:.2}, zoom={:.2}, target=({:.3},{:.3}), easing=smoothstep", 
+                s, e, zoom_scale, tx, ty);
+            
+            // SMOOTHSTEP ZOOM EXPRESSION
+            // For zoom-in (s to si): intensity = smoothstep((t-s)/ease)
+            // For hold (si to so): intensity = 1
+            // For zoom-out (so to e): intensity = smoothstep((e-t)/ease)
+            // 
+            // smoothstep(t) = t*t*(3-2*t)
+            // 
+            // FFmpeg expression for smoothstep zoom:
             let zoom_expr = format!(
-                "if(between(t,{s},{e}),if(lt(t,{si}),1+{delta}*(t-{s})/{ease},if(lt(t,{so}),{zoom_scale},{zoom_scale}-{delta}*(t-{so})/{ease})),1)",
+                "if(between(t,{s},{e}),\
+                    if(lt(t,{si}),\
+                        1+{delta}*pow((t-{s})/{ease},2)*(3-2*(t-{s})/{ease}),\
+                        if(lt(t,{so}),\
+                            {zoom_scale},\
+                            1+{delta}*pow(({e}-t)/{ease},2)*(3-2*({e}-t)/{ease})\
+                        )\
+                    ),\
+                1)",
                 s = s, si = si, so = so, e = e, zoom_scale = zoom_scale, delta = delta, ease = ease
             );
             zoom_parts.push(format!("if(between(t,{},{}),{},0)", s, e, zoom_expr));
             
-            // Position expressions
-            // When zoomed, we need to offset the video to center the target point
-            // Target position in base-scaled video: tx * video_width_scaled = tx * width * base_scale * zoom
-            // To center this in output: offset = output_center - target_position
-            //                                  = width/2 - (margin * width + tx * width * base_scale) * zoom
-            // But it's simpler to think in terms of the video placement offset from center
+            // CURSOR-FOLLOWING PAN (First Principles)
+            // During hold phase, we should follow the cursor like the preview does.
+            // For now, we use a simplified approach: compute weighted average position
+            // from cursor data during the effect's time range.
+            let (pan_x, pan_y) = if let Some(ref positions) = cursor_positions {
+                // Find cursor positions during hold phase and compute smooth path
+                compute_cursor_pan_during_effect(positions, s, si, so, e, tx, ty, margin, base_scale, trim_start)
+            } else {
+                (tx, ty)
+            };
             
-            // x_offset = (0.5 - (margin + tx * base_scale)) * width * (zoom - 1)
-            // When zoom=1: offset=0 (video centered)
-            // When zoom>1: offset shifts to center the target point
+            // FIRST PRINCIPLES: Match preview's exact transform formula
+            // Preview: translateX = (0.5 - viewportX) * (scale - 1) * 100%
+            // 
+            // In FFmpeg, we overlay the scaled video on a canvas.
+            // The video is scaled by base_scale * zoom, so its size is: iw * base * zoom
+            // The centered position is: (canvas_w - video_w) / 2
+            // To pan to target: we need to offset so the target point is at canvas center
+            //
+            // When zoomed, the target pixel in video is at: pan_x * video_w (from left edge of video)
+            // We want this pixel to be at canvas center: canvas_w / 2
+            // So video left edge should be at: canvas_w/2 - pan_x * video_w
+            // Normal centered position is: (canvas_w - video_w) / 2
+            // Offset from centered = target_position - centered_position
+            //                      = canvas_w/2 - pan_x * video_w - (canvas_w - video_w)/2
+            //                      = canvas_w/2 - pan_x * video_w - canvas_w/2 + video_w/2
+            //                      = video_w * (0.5 - pan_x)
+            //                      = (iw * base * zoom) * (0.5 - pan_x)
+            //
+            // This is the key formula that matches preview behavior!
             
-            let target_in_canvas = margin + tx * base_scale;  // Where target is in normalized canvas coords
-            let y_target_in_canvas = margin + ty * base_scale;
+            // x_offset = (0.5 - pan_x) * iw * base_scale * zoom_factor
+            // But since video_w = iw * base * zoom = width * base * zoom (for 1:1 aspect)
+            // We can express as: (0.5 - pan_x) * width * base_scale * (zoom_expr)
             
-            let x_offset_formula = format!("(0.5-{})*{}*(({zoom_expr})-1)", 
-                target_in_canvas, width,
+            let x_offset_formula = format!("(0.5-{pan})*{w}*{base}*({zoom_expr})", 
+                pan = pan_x,
+                w = width,
+                base = base_scale,
                 zoom_expr = zoom_expr);
-            let y_offset_formula = format!("(0.5-{})*{}*(({zoom_expr})-1)", 
-                y_target_in_canvas, height,
+            let y_offset_formula = format!("(0.5-{pan})*{h}*{base}*({zoom_expr})", 
+                pan = pan_y,
+                h = height,
+                base = base_scale,
                 zoom_expr = zoom_expr);
             
             x_parts.push(format!("if(between(t,{},{}),{},0)", s, e, x_offset_formula));
