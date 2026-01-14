@@ -213,8 +213,9 @@ export function VideoPreview({
             const time = video.currentTime;
 
             // Find active zoom effect at current time
+            // ANTICIPATION MODEL: Zoom-in happens BEFORE startTime, so effect is active from (startTime - duration)
             const zoomEffect = effects.find(
-                e => e.type === 'zoom' && time >= e.startTime && time <= e.endTime
+                e => e.type === 'zoom' && time >= (e.startTime - duration) && time <= e.endTime
             );
 
             const ZOOM_SCALE = zoomEffect?.scale || 3.0;
@@ -229,7 +230,12 @@ export function VideoPreview({
                 // Active zoom - disable transition, compute directly
                 container.style.transition = 'none';
 
-                const timeInEffect = time - zoomEffect.startTime;
+                // ANTICIPATION TIMING: Zoom is fully in AT startTime (the click moment)
+                // Zoom-in happens from (startTime - duration) to startTime
+                // Hold happens from startTime to (endTime - duration)
+                // Zoom-out happens from (endTime - duration) to endTime
+                const anticipationStart = zoomEffect.startTime - duration;
+                const timeFromAnticipation = time - anticipationStart; // Time since zoom-in began
                 const timeToEnd = zoomEffect.endTime - time;
 
                 // Initialize viewport for new effect
@@ -244,8 +250,9 @@ export function VideoPreview({
                 let viewportX = viewportRef.current.x;
                 let viewportY = viewportRef.current.y;
 
-                // Follow cursor during hold phase
-                if (positions.length > 0 && timeInEffect > ZOOM_TRANSITION_TIME && timeToEnd > ZOOM_TRANSITION_TIME) {
+                // Follow cursor during hold phase (between startTime and endTime - duration)
+                // With anticipation model, hold starts at startTime (fully zoomed) and ends at (endTime - duration)
+                if (positions.length > 0 && time >= zoomEffect.startTime && timeToEnd > ZOOM_TRANSITION_TIME) {
                     const cursorPos = getCursorAtTime(positions, time * 1000, cursorIndexRef);
                     if (cursorPos) {
                         const SMOOTHING = 0.12; // Slightly higher = more responsive
@@ -262,15 +269,21 @@ export function VideoPreview({
                     }
                 }
 
-                // Smoothstep for zoom in/out
+                // Smoothstep for zoom in/out with ANTICIPATION model
+                // Zoom-in: from (startTime - duration) to startTime → fully zoomed AT startTime
+                // Hold: from startTime to (endTime - duration)
+                // Zoom-out: from (endTime - duration) to endTime
                 let zoomIntensity: number;
-                if (timeInEffect < ZOOM_TRANSITION_TIME) {
-                    const t = timeInEffect / ZOOM_TRANSITION_TIME;
+                if (timeFromAnticipation < ZOOM_TRANSITION_TIME) {
+                    // Zooming IN (anticipation phase before the click)
+                    const t = timeFromAnticipation / ZOOM_TRANSITION_TIME;
                     zoomIntensity = t * t * (3 - 2 * t);
                 } else if (timeToEnd < ZOOM_TRANSITION_TIME) {
+                    // Zooming OUT
                     const t = timeToEnd / ZOOM_TRANSITION_TIME;
                     zoomIntensity = t * t * (3 - 2 * t);
                 } else {
+                    // Hold phase (fully zoomed)
                     zoomIntensity = 1;
                 }
 
