@@ -614,29 +614,10 @@ struct ExportOptions {
 }
 
 // Check if hardware encoder is available
+// NOTE: GPU encoding disabled - always use CPU (libx264) for now
 fn detect_hardware_encoder() -> Option<String> {
-    // Try NVENC first (NVIDIA)
-    let nvenc_test = Command::new("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output();
-    
-    if let Ok(output) = nvenc_test {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.contains("h264_nvenc") {
-            println!("Hardware encoder detected: NVENC");
-            return Some("h264_nvenc".to_string());
-        }
-        if stdout.contains("h264_qsv") {
-            println!("Hardware encoder detected: QuickSync");
-            return Some("h264_qsv".to_string());
-        }
-        if stdout.contains("h264_amf") {
-            println!("Hardware encoder detected: AMF (AMD)");
-            return Some("h264_amf".to_string());
-        }
-    }
-    
-    println!("No hardware encoder detected, using libx264");
+    // GPU encoding disabled - always use software encoder
+    println!("GPU encoding disabled, using libx264 (CPU)");
     None
 }
 
