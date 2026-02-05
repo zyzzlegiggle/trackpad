@@ -259,6 +259,13 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 }
             }
 
+            // FIRST PRINCIPLES: Zoom target should be NEAR the click, not centered on it
+            // Blend click position with center (0.5, 0.5) so cursor appears off-center
+            // Factor < 1.0 means viewport shifts partially towards the click
+            const ZOOM_OFFSET_FACTOR = 0.6; // 0.6 = 60% towards click, 40% towards center
+            const offsetTargetX = 0.5 + (click.x - 0.5) * ZOOM_OFFSET_FACTOR;
+            const offsetTargetY = 0.5 + (click.y - 0.5) * ZOOM_OFFSET_FACTOR;
+
             const effect: Effect = {
                 id: `zoom-auto-${index}-${Date.now()}`,
                 type: 'zoom',
@@ -266,8 +273,8 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                 endTime: adjustedStart + zoomDuration,
                 lane: 0,
                 scale: 1.5,
-                targetX: click.x,
-                targetY: click.y,
+                targetX: offsetTargetX,
+                targetY: offsetTargetY,
             };
 
             generatedEffects.push(effect);
