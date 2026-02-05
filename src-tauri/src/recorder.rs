@@ -203,12 +203,21 @@ pub struct WindowInfo {
 pub fn get_open_windows() -> Vec<WindowInfo> {
     let mut result = Vec::new();
     
+    // Windows system windows to hide from the list
+    let excluded_titles = [
+        "Settings",
+        "Windows Input Experience",
+        "Program Manager",
+        "Microsoft Text Input Application",
+    ];
+    
     if let Ok(windows) = Window::enumerate() {
         for window in windows {
             // Only include valid windows with non-empty titles
             if window.is_valid() {
                 if let Ok(title) = window.title() {
-                    if !title.is_empty() {
+                    // Skip empty titles and excluded system windows
+                    if !title.is_empty() && !excluded_titles.contains(&title.as_str()) {
                         // Get raw HWND as isize for serialization
                         let hwnd_ptr = window.as_raw_hwnd();
                         result.push(WindowInfo {
