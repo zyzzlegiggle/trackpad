@@ -879,12 +879,16 @@ async fn export_with_effects(
             // But since video_w = iw * base * zoom = width * base * zoom (for 1:1 aspect)
             // We can express as: (0.5 - pan_expr) * width * base_scale * (zoom_expr)
             
-            let x_offset_formula = format!("(0.5-({pan}))*{w}*{base}*({zoom_expr})", 
+            // FIRST PRINCIPLES FIX: Match preview's exact formula
+            // Preview: translateX = (0.5 - viewportX) * (currentScale - 1) * 100
+            // When scale = 1 (neutral), offset must be 0 for smooth transition
+            // Using (zoom_expr - 1) ensures offset is 0 at neutral state
+            let x_offset_formula = format!("(0.5-({pan}))*{w}*{base}*(({zoom_expr})-1)", 
                 pan = pan_x_expr,
                 w = width,
                 base = base_scale,
                 zoom_expr = zoom_expr);
-            let y_offset_formula = format!("(0.5-({pan}))*{h}*{base}*({zoom_expr})", 
+            let y_offset_formula = format!("(0.5-({pan}))*{h}*{base}*(({zoom_expr})-1)", 
                 pan = pan_y_expr,
                 h = height,
                 base = base_scale,
