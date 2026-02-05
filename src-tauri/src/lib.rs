@@ -80,6 +80,7 @@ struct ZoomEffect {
     scale: f64,
     target_x: f64,  // Normalized 0-1
     target_y: f64,  // Normalized 0-1
+    easing: Option<String>,  // "slow", "mellow", "quick", "rapid" - matches preview presets
 }
 
 // Cursor frame for export - represents cursor position at a point in time
@@ -97,6 +98,7 @@ struct CursorExportSettings {
     size: i32,       // Cursor size in pixels
     color: String,   // Hex color without #
     style: String,   // "pointer", "circle", or "crosshair"
+    smoothing: Option<f64>,  // Lerp factor to match preview cursor movement
 }
 
 // Generate cursor image as PNG file for FFmpeg overlay
@@ -205,9 +207,27 @@ fn generate_cursor_image(style: &str, size: i32, color: &str) -> Result<std::pat
     // Save to temp file
     let temp_dir = std::env::temp_dir();
     let cursor_path = temp_dir.join(format!("visualcoder_cursor_{}_{}.png", style, size));
+    
+    // FIRST PRINCIPLES FIX: Ensure file is fully written before FFmpeg reads it
+    // On first run, the file is new and may not be fully flushed to disk
+    // This causes "Failed to configure input pad on Parsed_overlay" errors
     img.save(&cursor_path).map_err(|e| format!("Failed to save cursor image: {}", e))?;
     
-    println!("Generated cursor image: {:?}", cursor_path);
+    // Explicitly sync to ensure file is on disk (fixes intermittent first-run failures)
+    if let Ok(file) = std::fs::File::open(&cursor_path) {
+        let _ = file.sync_all();
+    }
+    
+    // Verify file exists and has content
+    match std::fs::metadata(&cursor_path) {
+        Ok(meta) => {
+            println!("Generated cursor image: {:?} ({} bytes)", cursor_path, meta.len());
+        }
+        Err(e) => {
+            return Err(format!("Cursor image not found after save: {}", e));
+        }
+    }
+    
     Ok(cursor_path)
 }
 
@@ -305,10 +325,12 @@ fn build_cursor_overlay_on_video(
     // we just convert normalized (0-1) to actual video pixel coordinates.
     // The cursor center should be at (x * width, y * height), so we subtract half cursor size.
     
-    // FIRST PRINCIPLES: More keyframes = smoother cursor movement
-    // At 60fps, 500 keyframes over 10s = 1 keyframe every 1.2 frames (very smooth)
-    // Previous: 100 keyframes caused ~6 frame gaps = visible jitter
-    let max_keyframes = 500;
+    // FIRST PRINCIPLES: Balance smoothness vs FFmpeg expression complexity
+    // WARNING: Too many keyframes causes "Error reinitializing filters!" because
+    // each keyframe adds a nested if() statement, and FFmpeg has parser limits.
+    // 100 keyframes is a safe limit that still provides smooth cursor movement.
+    // At 60fps over 10s = 600 frames, 100 keyframes = 1 keyframe every 6 frames (acceptable)
+    let max_keyframes = 100;  // Reduced from 500 to prevent FFmpeg expression overflow
     let step = (positions.len() / max_keyframes).max(1);
     
     let mut x_expr_parts: Vec<(f64, f64)> = Vec::new();
@@ -456,13 +478,18 @@ fn build_dynamic_pan_during_effect(
     let initial_x_clamped = initial_x.max(min_center).min(max_center);
     let initial_y_clamped = initial_y.max(min_center).min(max_center);
     
-    // SIMULATE FRAME-BY-FRAME EXPONENTIAL SMOOTHING
-    // Preview runs at 60fps with smoothing factor 0.12 per frame
-    // Formula: currentPos += (targetPos - currentPos) * 0.12
+    // SIMULATE FRAME-BY-FRAME SMART VIEWPORT PANNING
+    // Preview uses smart panning: only move viewport when cursor approaches edges
+    // Inner container: 70% of viewport, Outer margin: 15% on each edge
     let fps = 60.0;
-    let smoothing = 0.12;
+    let inner_margin = 0.15;  // Match preview INNER_MARGIN
+    let pan_speed = 0.08;     // Match preview PAN_SPEED
     let effect_duration = effect_end - effect_start;
     let total_frames = (effect_duration * fps).ceil() as usize;
+    
+    // Calculate viewport size at zoom scale
+    let half_viewport = 0.5 / zoom_scale;
+    let inner_half = half_viewport * (1.0 - 2.0 * inner_margin);
     
     // Convert positions to a lookup structure for efficient time-based access
     let effect_start_ms = ((effect_start + trim_start) * 1000.0) as u64;
@@ -510,7 +537,7 @@ fn build_dynamic_pan_during_effect(
         ))
     }
     
-    // Generate smoothed keyframes at 60fps
+    // Generate keyframes with smart panning at 60fps
     let mut x_keyframes: Vec<(f64, f64)> = Vec::new();
     let mut y_keyframes: Vec<(f64, f64)> = Vec::new();
     
@@ -534,11 +561,23 @@ fn build_dynamic_pan_during_effect(
             // ZOOM-IN PHASE: Stay at initial target (no cursor following)
             // Just keep current position (already set to initial)
         } else if t < zoom_out_start {
-            // HOLD PHASE: Follow cursor with exponential smoothing
+            // HOLD PHASE: Smart viewport panning (match preview exactly)
             if let Some((cursor_x, cursor_y)) = get_cursor_at_time_ms(&effect_positions, time_ms) {
-                // Apply exponential smoothing (same as preview)
-                current_x += (cursor_x - current_x) * smoothing;
-                current_y += (cursor_y - current_y) * smoothing;
+                // Calculate cursor position relative to viewport center
+                let rel_x = cursor_x - current_x;
+                let rel_y = cursor_y - current_y;
+                
+                // Only pan if cursor is outside inner container
+                if rel_x.abs() > inner_half {
+                    let direction = if rel_x > 0.0 { 1.0 } else { -1.0 };
+                    let overshoot = rel_x.abs() - inner_half;
+                    current_x += direction * pan_speed * overshoot * 2.0;
+                }
+                if rel_y.abs() > inner_half {
+                    let direction = if rel_y > 0.0 { 1.0 } else { -1.0 };
+                    let overshoot = rel_y.abs() - inner_half;
+                    current_y += direction * pan_speed * overshoot * 2.0;
+                }
                 
                 // Clamp to viewport bounds
                 current_x = current_x.max(min_center).min(max_center);
@@ -554,8 +593,8 @@ fn build_dynamic_pan_during_effect(
         }
     }
     
-    println!("  Dynamic pan: built {} keyframes with exponential smoothing (factor={:.2})", 
-             x_keyframes.len(), smoothing);
+    println!("  Dynamic pan: built {} keyframes with smart viewport panning (inner_margin={:.2})", 
+             x_keyframes.len(), inner_margin);
     println!("  Viewport clamped to [{:.3}, {:.3}] based on zoom scale {:.2}", 
              min_center, max_center, zoom_scale);
     
@@ -651,12 +690,22 @@ async fn export_with_effects(
     resolution: Option<String>,
     quality: Option<String>,
     format: Option<String>,
+    // FIRST PRINCIPLES: Accept canvas settings to match preview exactly
+    padding_percent: Option<f64>,
+    border_radius: Option<i32>,
 ) -> Result<String, String> {
     let duration = trim_end - trim_start;
     let bg_color = background_color.unwrap_or_else(|| "1a1a2e".to_string());
     let quality_setting = quality.unwrap_or_else(|| "high".to_string());
     let resolution_setting = resolution.unwrap_or_else(|| "original".to_string());
     let _format_setting = format.unwrap_or_else(|| "mp4".to_string());
+    
+    // FIRST PRINCIPLES: Use padding_percent from preview to calculate base_scale
+    // Preview: padding creates margins around video, reducing visible video size
+    // Export: base_scale = 1.0 - (2 * padding_percent / 100) to match
+    // E.g., 5% padding = 10% total margin = 0.90 scale
+    let padding = padding_percent.unwrap_or(5.0);
+    let _border_rad = border_radius.unwrap_or(12);
     
     // Detect hardware encoder once at export start
     let hw_encoder = detect_hardware_encoder();
@@ -666,10 +715,11 @@ async fn export_with_effects(
     println!("Output: {}", output_path);
     println!("Trim: {:.2} - {:.2} (duration: {:.2})", trim_start, trim_end, duration);
     println!("Background color: #{}", bg_color);
+    println!("Padding: {:.1}%, Border radius: {}px", padding, _border_rad);
     println!("Effects received: {}", effects.len());
     for (i, eff) in effects.iter().enumerate() {
-        println!("  Effect {}: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3})", 
-            i, eff.start_time, eff.end_time, eff.scale, eff.target_x, eff.target_y);
+        println!("  Effect {}: time={:.2}-{:.2}, scale={:.2}, target=({:.3},{:.3}), easing={:?}", 
+            i, eff.start_time, eff.end_time, eff.scale, eff.target_x, eff.target_y, eff.easing);
     }
     
     // Get video dimensions
@@ -706,28 +756,30 @@ async fn export_with_effects(
         "-t".to_string(), format!("{:.3}", duration),
     ];
     
-    // === ZOOMED-OUT CANVAS APPROACH ===
-    // Base state: Video scaled to 85% to show background padding
-    // Zoomed state: Video scaled to base_scale * zoom_factor
-    //
-    // This ensures:
-    // 1. Background is always visible in base state
-    // 2. Zoom effects work correctly by scaling video up
-    // 3. Edge zooms show background instead of black
+    // === ZOOMED-OUT CANVAS APPROACH (FIRST PRINCIPLES FIX) ===
+    // CRITICAL: base_scale must match preview's paddingPercent setting
+    // Preview applies padding as: style={{ padding: `${paddingPercent}%` }}
+    // This creates a margin on all sides, effectively scaling video down
+    // Formula: base_scale = 1.0 - (2 * padding / 100)
+    // Examples:
+    //   5% padding = 0.90 scale (10% total padding)
+    //   10% padding = 0.80 scale (20% total padding)
+    //   0% padding = 1.0 scale (no padding, full frame)
     
-    let base_scale = 0.85;  // Video at 85% size in base state
-    let margin = (1.0 - base_scale) / 2.0;  // 7.5% margin on each side
+    let base_scale = 1.0 - (2.0 * padding / 100.0);
+    let margin = (1.0 - base_scale) / 2.0;
     
-    println!("Base scale: {:.2}, Margin: {:.1}%", base_scale, margin * 100.0);
+    println!("FIRST PRINCIPLES: padding={}% → base_scale={:.3}, margin={:.1}%", 
+             padding, base_scale, margin * 100.0);
     
     if !effects.is_empty() {
-        println!("Building filter for {} zoom effects (with smoothstep easing)", effects.len());
+        println!("Building filter for {} zoom effects (with per-effect easing)", effects.len());
         
         // FIRST PRINCIPLES: Match preview's zoom behavior exactly
         // Preview uses smoothstep: t * t * (3 - 2 * t) for smooth in/out
         // Preview follows cursor during hold phase with 0.12 smoothing
         
-        let ease = 0.35; // Match preview's "mellow" preset
+        // NOTE: ease duration is now PER-EFFECT, moved inside the loop
         
         // Build zoom expressions with SMOOTHSTEP easing (matches preview exactly)
         // Smoothstep formula: t² × (3 - 2t) where t = normalized time (0-1)
@@ -736,6 +788,15 @@ async fn export_with_effects(
         let mut y_parts: Vec<String> = Vec::new();
         
         for eff in effects.iter() {
+            // FIRST PRINCIPLES: Use per-effect easing duration
+            // Preview maps easing presets to duration: slow=0.5, mellow=0.35, quick=0.2, rapid=0.1
+            let ease = match eff.easing.as_ref().map(|s| s.as_str()) {
+                Some("slow") => 0.5,
+                Some("quick") => 0.2,
+                Some("rapid") => 0.1,
+                _ => 0.35, // "mellow" is default
+            };
+            
             // Adjust times relative to trim start
             let s = eff.start_time - trim_start;
             let e = eff.end_time - trim_start;
@@ -758,8 +819,8 @@ async fn export_with_effects(
             let so = e - ease;  // Start of zoom-out phase
             let delta = zoom_scale - 1.0;
             
-            println!("Effect: time={:.2}-{:.2} (anticipation starts at {:.2}), zoom={:.2}, target=({:.3},{:.3})", 
-                anticipation_start, e, s, zoom_scale, tx, ty);
+            println!("Effect: time={:.2}-{:.2} (anticipation starts at {:.2}), zoom={:.2}, target=({:.3},{:.3}), ease={:.2}s", 
+                anticipation_start, e, s, zoom_scale, tx, ty, ease);
             
             // SMOOTHSTEP ZOOM EXPRESSION with ANTICIPATION
             // For zoom-in (anticipation_start to s): intensity = smoothstep((t-anticipation_start)/ease)

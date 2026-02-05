@@ -4,6 +4,7 @@ export interface ClickEvent {
     x: number;
     y: number;
     is_double_click: boolean;
+    is_triple_click: boolean;  // True if this was a triple-click (zoom trigger)
 }
 
 // Cursor position from recording (for cursor-following zoom)

@@ -226,18 +226,19 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         // Principle: Remove clicks that are too close in time (duplicate protection)
         const MIN_CLICK_GAP_MS = 300; // Minimum gap between distinct double-clicks
 
-        const doubleClicks = clickEvents
-            .filter(click => click.is_double_click)
+        // Filter for triple-clicks (new zoom trigger) instead of double-clicks
+        const tripleClicks = clickEvents
+            .filter(click => click.is_triple_click)
             .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
 
         // Deduplicate: keep only clicks that are MIN_CLICK_GAP_MS apart
-        const deduplicatedClicks = doubleClicks.filter((click, index) => {
+        const deduplicatedClicks = tripleClicks.filter((click, index) => {
             if (index === 0) return true;
-            const prevClick = doubleClicks[index - 1];
+            const prevClick = tripleClicks[index - 1];
             return click.timestamp_ms - prevClick.timestamp_ms >= MIN_CLICK_GAP_MS;
         });
 
-        console.log(`Click events: ${clickEvents.length} total, ${doubleClicks.length} double-clicks, ${deduplicatedClicks.length} after deduplication`);
+        console.log(`Click events: ${clickEvents.length} total, ${tripleClicks.length} triple-clicks, ${deduplicatedClicks.length} after deduplication`);
 
         deduplicatedClicks.forEach((click, index) => {
             const startTime = click.timestamp_ms / 1000;
@@ -529,6 +530,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
             const outputPath = inputPath.replace(`temp_${finalName}`, finalName);
 
             // Get zoom effects to export
+            // FIRST PRINCIPLES: Pass all effect properties to ensure export matches preview
             const zoomEffects = effects
                 .filter(e => e.type === 'zoom' && e.startTime >= trimStart && e.endTime <= trimEnd)
                 .map(e => ({
@@ -537,6 +539,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     scale: e.scale || 1.5,
                     target_x: e.targetX || 0.5,
                     target_y: e.targetY || 0.5,
+                    easing: e.easing || 'mellow',  // Per-effect easing preset
                 }));
 
             // Prepare cursor data for export
@@ -550,7 +553,8 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     visible: cursorSettings.visible,
                     size: cursorSettings.size,
                     color: cursorSettings.color.replace('#', ''),
-                    style: cursorSettings.style,  // Pass cursor style for proper graphic generation
+                    style: cursorSettings.style,
+                    smoothing: cursorSettings.smoothing,  // Pass smoothing factor for matching preview
                 },
             } : {};
 
@@ -564,6 +568,9 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
                     trimEnd,
                     effects: zoomEffects,
                     backgroundColor: canvasSettings.backgroundColor.replace('#', ''),
+                    // FIRST PRINCIPLES: Pass canvas settings so export matches preview exactly
+                    paddingPercent: canvasSettings.paddingPercent,
+                    borderRadius: canvasSettings.borderRadius,
                     resolution: exportSettings.resolution,
                     quality: exportSettings.quality,
                     format: exportSettings.format,

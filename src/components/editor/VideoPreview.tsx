@@ -255,11 +255,38 @@ export function VideoPreview({
                 if (positions.length > 0 && time >= zoomEffect.startTime && timeToEnd > ZOOM_TRANSITION_TIME) {
                     const cursorPos = getCursorAtTime(positions, time * 1000, cursorIndexRef);
                     if (cursorPos) {
-                        const SMOOTHING = 0.12; // Slightly higher = more responsive
-                        viewportX += (cursorPos.x - viewportX) * SMOOTHING;
-                        viewportY += (cursorPos.y - viewportY) * SMOOTHING;
+                        // SMART VIEWPORT PANNING (First Principles):
+                        // Instead of always following cursor, only pan when cursor approaches viewport edges.
+                        // This keeps cursor in an "inner container" for better UX (less jerky, easier to aim).
+                        //
+                        // Inner container: 70% of viewport (35% from center each way)
+                        // Outer container: 15% margin on each edge - triggers panning
+                        const INNER_MARGIN = 0.15;  // 15% margin for outer container
+                        const PAN_SPEED = 0.08;     // How fast viewport moves when panning
 
-                        const minCenter = 1 / ZOOM_SCALE / 2;
+                        // Calculate visible viewport size at current zoom
+                        // At scale S, viewport shows 1/S of the video in each dimension
+                        const halfViewport = 0.5 / ZOOM_SCALE;
+                        const innerHalf = halfViewport * (1 - 2 * INNER_MARGIN);  // Inner safe zone
+
+                        // Cursor position relative to viewport center
+                        const relX = cursorPos.x - viewportX;
+                        const relY = cursorPos.y - viewportY;
+
+                        // If cursor is outside inner container, move viewport towards it
+                        if (Math.abs(relX) > innerHalf) {
+                            const direction = relX > 0 ? 1 : -1;
+                            const overshoot = Math.abs(relX) - innerHalf;
+                            viewportX += direction * PAN_SPEED * overshoot * 2;
+                        }
+                        if (Math.abs(relY) > innerHalf) {
+                            const direction = relY > 0 ? 1 : -1;
+                            const overshoot = Math.abs(relY) - innerHalf;
+                            viewportY += direction * PAN_SPEED * overshoot * 2;
+                        }
+
+                        // Clamp viewport to video bounds
+                        const minCenter = 0.5 / ZOOM_SCALE;
                         const maxCenter = 1 - minCenter;
                         viewportX = Math.max(minCenter, Math.min(maxCenter, viewportX));
                         viewportY = Math.max(minCenter, Math.min(maxCenter, viewportY));

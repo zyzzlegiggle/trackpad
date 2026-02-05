@@ -26,6 +26,7 @@ pub struct ClickEvent {
     pub x: f64,                 // Normalized X (0.0 - 1.0)
     pub y: f64,                 // Normalized Y (0.0 - 1.0)
     pub is_double_click: bool,  // True if this was a double-click
+    pub is_triple_click: bool,  // True if this was a triple-click (zoom trigger)
 }
 
 // Cursor position captured during recording (for cursor-following zoom)
@@ -42,6 +43,8 @@ lazy_static::lazy_static! {
     static ref CURSOR_POSITIONS: Mutex<Vec<CursorPosition>> = Mutex::new(Vec::new());
     static ref RECORDING_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
     static ref LAST_CLICK: Mutex<Option<(Instant, f64, f64)>> = Mutex::new(None);
+    // Track last two clicks for triple-click detection: [(time, x, y), (time, x, y)]
+    static ref LAST_TWO_CLICKS: Mutex<Vec<(Instant, f64, f64)>> = Mutex::new(Vec::new());
     // Track when the last zoom was triggered to prevent stacking during active zoom
     static ref LAST_ZOOM_TRIGGER: Mutex<Option<Instant>> = Mutex::new(None);
     static ref LAST_CURSOR_SAMPLE: Mutex<Option<Instant>> = Mutex::new(None);
@@ -346,7 +349,37 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                     }
                 };
                 
-                // Check for double-click (within 500ms and close position)
+                // Check for triple-click (3 clicks within 800ms and close position)
+                // Triple-click is the new zoom trigger (instead of double-click)
+                let is_triple_click = {
+                    let mut last_two = LAST_TWO_CLICKS.lock().unwrap();
+                    
+                    // Check if we have two previous clicks that form a triple with this one
+                    let is_triple = if last_two.len() >= 2 {
+                        let (first_time, first_x, first_y) = last_two[last_two.len() - 2];
+                        let (second_time, second_x, second_y) = last_two[last_two.len() - 1];
+                        
+                        // All 3 clicks must be within 800ms total and close in position
+                        let time_from_first = now.duration_since(first_time).as_millis();
+                        let time_from_second = now.duration_since(second_time).as_millis();
+                        let dist_from_first = ((norm_x - first_x).powi(2) + (norm_y - first_y).powi(2)).sqrt();
+                        let dist_from_second = ((norm_x - second_x).powi(2) + (norm_y - second_y).powi(2)).sqrt();
+                        
+                        time_from_first < 800 && time_from_second < 400 && dist_from_first < 0.05 && dist_from_second < 0.05
+                    } else {
+                        false
+                    };
+                    
+                    // Add current click to history (keep only last 2)
+                    last_two.push((now, norm_x, norm_y));
+                    if last_two.len() > 2 {
+                        last_two.remove(0);
+                    }
+                    
+                    is_triple
+                };
+                
+                // Also track double-click for backwards compatibility
                 let is_double_click = {
                     let mut last_click = LAST_CLICK.lock().unwrap();
                     let is_double = if let Some((last_time, last_x, last_y)) = *last_click {
@@ -360,10 +393,10 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                     is_double
                 };
                 
-                // Only store double-clicks (that's what triggers zoom)
+                // Only store triple-clicks (that's what triggers zoom now)
                 // But first, check if we're in a zoom cooldown period
-                // Principle: A zoom lasts ~3 seconds, so ignore double-clicks during that time
-                if is_double_click {
+                // Principle: A zoom lasts ~3 seconds, so ignore clicks during that time
+                if is_triple_click {
                     const ZOOM_COOLDOWN_MS: u128 = 3000; // Match typical zoom duration
                     
                     let should_trigger_zoom = {
@@ -375,12 +408,14 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                         };
                         
                         if !in_cooldown {
-                            // Not in cooldown, this double-click triggers a zoom
+                            // Not in cooldown, this triple-click triggers a zoom
                             *last_zoom = Some(now);
+                            // Clear click history to prevent accidental re-triggers
+                            LAST_TWO_CLICKS.lock().unwrap().clear();
                             true
                         } else {
-                            // In cooldown, ignore this double-click
-                            println!("Double-click ignored (zoom cooldown active)");
+                            // In cooldown, ignore this triple-click
+                            println!("Triple-click ignored (zoom cooldown active)");
                             false
                         }
                     };
@@ -390,9 +425,10 @@ fn spawn_mouse_listener_v2(stop_signal: Arc<AtomicBool>) {
                             timestamp_ms,
                             x: norm_x,
                             y: norm_y,
-                            is_double_click: true,
+                            is_double_click,
+                            is_triple_click: true,
                         };
-                        println!("Double-click captured at ({:.3}, {:.3}) in video coords @ {}ms", norm_x, norm_y, timestamp_ms);
+                        println!("Triple-click captured at ({:.3}, {:.3}) in video coords @ {}ms", norm_x, norm_y, timestamp_ms);
                         CLICK_EVENTS.lock().unwrap().push(click_event);
                     }
                 }
@@ -423,6 +459,7 @@ pub fn start_recording(state: State<'_, RecorderState>, filename: String, fps: S
     CLICK_EVENTS.lock().unwrap().clear();
     CURSOR_POSITIONS.lock().unwrap().clear();
     *LAST_CLICK.lock().unwrap() = None;
+    LAST_TWO_CLICKS.lock().unwrap().clear();
     *LAST_ZOOM_TRIGGER.lock().unwrap() = None;
     *LAST_CURSOR_SAMPLE.lock().unwrap() = None;
     *RECORDING_START_TIME.lock().unwrap() = Some(Instant::now());

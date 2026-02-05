@@ -15,6 +15,7 @@ interface ClickEvent {
   x: number;
   y: number;
   is_double_click: boolean;
+  is_triple_click: boolean;  // Zoom trigger
 }
 
 // Cursor position from backend
