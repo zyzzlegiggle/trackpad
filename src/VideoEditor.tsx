@@ -567,7 +567,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
 
             if (zoomEffects.length > 0 || cursorSettings.visible) {
                 // Export with effects (slower, re-encodes)
-                setExportStatus("Applying effects...");
+                setExportStatus("Exporting...");
                 await invoke("export_with_effects", {
                     inputPath,
                     outputPath,
