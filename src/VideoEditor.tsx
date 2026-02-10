@@ -519,82 +519,133 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
         setSelectedEffectId(effect.id);
     };
 
-    // Export handlers
+    // =========================================================================
+    // CANVAS-BASED EXPORT
+    // =========================================================================
+    // FIRST PRINCIPLES: Use the SAME rendering code as preview to ensure
+    // pixel-perfect consistency. We render frames to canvas, extract RGB data,
+    // and send to Rust/FFmpeg for encoding only.
+    //
+    // CRITICAL: The video element must have access to its source file throughout
+    // the entire export process, so we DON'T move/copy the file until we're done.
+
     const handleExport = async () => {
         setIsExporting(true);
-        setExportStatus("Exporting...");
+        setExportStatus("Preparing export...");
+
+        const video = videoRef.current;
+        if (!video) {
+            setExportStatus("No video loaded");
+            setIsExporting(false);
+            return;
+        }
 
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
             const finalName = `recording_${timestamp}_edited.mp4`;
 
-            const videosDir = await invoke<string>("move_video_to_videos", {
-                tempPath: videoPath,
-                finalName: `temp_${finalName}`
-            });
+            // Get the Videos directory path (without moving the file yet!)
+            const videosDir = await invoke<string>("get_videos_dir_path");
+            const outputPath = `${videosDir}\\${finalName}`;
 
-            const inputPath = videosDir;
-            const outputPath = inputPath.replace(`temp_${finalName}`, finalName);
+            // Determine export dimensions
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
 
-            // Get zoom effects to export
-            // FIRST PRINCIPLES: Pass all effect properties to ensure export matches preview
-            const zoomEffects = effects
-                .filter(e => e.type === 'zoom' && e.startTime >= trimStart && e.endTime <= trimEnd)
-                .map(e => ({
-                    start_time: e.startTime,
-                    end_time: e.endTime,
-                    scale: e.scale || 1.5,
-                    target_x: e.targetX || 0.5,
-                    target_y: e.targetY || 0.5,
-                    easing: e.easing || 'mellow',  // Per-effect easing preset
-                }));
+            let exportWidth = videoWidth;
+            let exportHeight = videoHeight;
 
-            // Prepare cursor data for export
-            const cursorExportData = cursorSettings.visible && cursorPositions.length > 0 ? {
-                cursorPositions: cursorPositions.map(p => ({
-                    timestamp_ms: p.timestamp_ms,
-                    x: p.x,
-                    y: p.y,
-                })),
-                cursorSettings: {
-                    visible: cursorSettings.visible,
-                    size: cursorSettings.size,
-                    color: cursorSettings.color.replace('#', ''),
-                    style: cursorSettings.style,
-                    smoothing: cursorSettings.smoothing,  // Pass smoothing factor for matching preview
-                },
-            } : {};
+            // Adjust for resolution setting
+            if (exportSettings.resolution === '720p') {
+                exportHeight = 720;
+                exportWidth = Math.round(720 * (videoWidth / videoHeight));
+            } else if (exportSettings.resolution === '1080p') {
+                exportHeight = 1080;
+                exportWidth = Math.round(1080 * (videoWidth / videoHeight));
+            } else if (exportSettings.resolution === '4k') {
+                exportHeight = 2160;
+                exportWidth = Math.round(2160 * (videoWidth / videoHeight));
+            }
 
-            if (zoomEffects.length > 0 || cursorSettings.visible) {
-                // Export with effects (slower, re-encodes)
-                setExportStatus("Exporting...");
-                await invoke("export_with_effects", {
-                    inputPath,
-                    outputPath,
-                    trimStart,
-                    trimEnd,
-                    effects: zoomEffects,
-                    backgroundColor: canvasSettings.backgroundColor.replace('#', ''),
-                    // FIRST PRINCIPLES: Pass canvas settings so export matches preview exactly
-                    paddingPercent: canvasSettings.paddingPercent,
-                    borderRadius: canvasSettings.borderRadius,
-                    resolution: exportSettings.resolution,
-                    quality: exportSettings.quality,
-                    format: exportSettings.format,
-                    ...cursorExportData,
-                });
-            } else {
-                // Fast export (no effects, no cursor)
+            // Ensure dimensions are even (required by many codecs)
+            exportWidth = Math.round(exportWidth / 2) * 2;
+            exportHeight = Math.round(exportHeight / 2) * 2;
+
+            const fps = 60;
+            const duration = trimEnd - trimStart;
+            const totalFrames = Math.ceil(duration * fps);
+
+            setExportStatus(`Rendering 0/${totalFrames} frames...`);
+
+            // Check if we have effects or cursor - if not, use fast path
+            const hasEffects = effects.some(e =>
+                e.type === 'zoom' && e.startTime >= trimStart && e.endTime <= trimEnd
+            );
+
+            if (!hasEffects && !cursorSettings.visible) {
+                // Fast path: no canvas rendering needed, just trim
+                // For fast path, we CAN use the temp file directly since FFmpeg reads it once
+                setExportStatus("Exporting (fast mode)...");
                 await invoke("trim_video", {
-                    inputPath,
+                    inputPath: videoPath,
                     outputPath,
                     startTime: trimStart,
                     endTime: trimEnd,
                 });
+            } else {
+                // Canvas-based export: render each frame from the ORIGINAL video
+                // The video element still has access to videoPath
+                const { exportFrames } = await import('./components/editor/exportRenderer');
+
+                // Collect frames (we'll batch send to Rust)
+                const frames: string[] = [];
+
+                await exportFrames(
+                    video,
+                    {
+                        width: exportWidth,
+                        height: exportHeight,
+                        fps,
+                        startTime: trimStart,
+                        endTime: trimEnd,
+                        effects,
+                        cursorPositions,
+                        cursorSettings,
+                        canvasSettings,
+                    },
+                    async (frameData, frameIndex) => {
+                        // Convert Uint8Array to base64
+                        const base64 = btoa(
+                            frameData.reduce((data, byte) => data + String.fromCharCode(byte), '')
+                        );
+                        frames.push(base64);
+
+                        // Update progress every 10 frames
+                        if (frameIndex % 10 === 0) {
+                            setExportStatus(`Rendering ${frameIndex}/${totalFrames} frames...`);
+                        }
+                    },
+                    (progress) => {
+                        // Progress callback - already handled above
+                    }
+                );
+
+                setExportStatus(`Encoding ${frames.length} frames...`);
+
+                // Send frames to Rust for encoding - encode directly to Videos folder
+                await invoke("encode_frames", {
+                    outputPath,
+                    width: exportWidth,
+                    height: exportHeight,
+                    fps,
+                    quality: exportSettings.quality,
+                    framesBase64: frames,
+                });
             }
 
+            // Cleanup temp video file (now safe to delete since we're done reading it)
             try {
-                await invoke("delete_temp_video", { tempPath: inputPath });
+                await invoke("delete_temp_video", { tempPath: videoPath });
             } catch (e) {
                 console.warn("Failed to cleanup temp file:", e);
             }
@@ -606,6 +657,7 @@ function VideoEditor({ videoPath, onClose, clickEvents = [], cursorPositions = [
             setExportStatus("Export failed");
             setIsExporting(false);
         }
+
     };
 
     const handleSaveOriginal = async () => {
